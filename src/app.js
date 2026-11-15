@@ -340,7 +340,7 @@ export function createApp({
   });
 
   async function serveStatic(req, res, pathname) {
-    const rel = pathname === '/' || pathname === '/mobile' ? 'mobile.html' : pathname === '/dispatcher' ? 'dispatcher.html' : pathname.slice(1);
+    const rel = pathname === '/' || pathname === '/mobile' ? 'mobile.html' : pathname === '/dispatcher' ? 'dispatcher.html' : pathname === '/landing' ? 'landing.html' : pathname.slice(1);
     const full = normalize(join(PUBLIC_DIR, rel));
     if (!full.startsWith(PUBLIC_DIR)) return send(res, 404, { error: 'NOT_FOUND' });
     try {
@@ -363,7 +363,9 @@ export function createApp({
     };
 
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'DENY');
+    // SAMEORIGIN, not DENY: the landing page embeds the real citizen app in its phone mockup. Other sites still cannot frame us.
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('Content-Security-Policy', "frame-ancestors 'self'");
     // not 'no-referrer': OpenStreetMap tile servers answer 403 "Access blocked" to requests without a Referer
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.setHeader('Cache-Control', 'no-store');
