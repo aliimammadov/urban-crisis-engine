@@ -119,6 +119,13 @@
   #profileOverlay .safesheet { max-height:92%; overflow-y:auto; }
   .opt { display:flex; align-items:center; gap:12px; padding:12px 4px; border-top:1px solid #eef0f3; font-size:15px; } .opt input { width:22px; height:22px; accent-color:#6d3fd8; flex:none; }
   .cdprio { margin-top:10px; background:#fff; color:#43228a; border-radius:999px; padding:6px 14px; font:800 14px var(--head); }
+  .bcbanner { margin-top:12px; border-radius:16px; padding:12px 14px; display:flex; flex-direction:column; gap:6px; font-size:14px; line-height:1.4; border:1.5px solid #f2d596; background:var(--amber-bg); color:var(--amber-ink); }
+  .bcbanner.info { background:#e6f2fd; border-color:#b9d6f6; color:#0a4f9e; } .bcbanner b { font:800 15px var(--head); letter-spacing:-0.02em; }
+  .bcbanner button { align-self:flex-start; border:0; background:rgba(0,0,0,.08); border-radius:10px; padding:7px 14px; font:700 13px var(--head); }
+  #bcOverlay { position:absolute; inset:0; z-index:2300; background:rgba(11,11,15,.6); display:none; align-items:flex-end; } #bcOverlay.on { display:flex; }
+  #bcOverlay .safesheet { border-top:8px solid #ff3b30; } #bcOverlay .tag { display:inline-block; background:#fdeceb; color:#b4231a; border-radius:999px; padding:3px 12px; font:800 12px var(--head); letter-spacing:.06em; text-transform:uppercase; align-self:flex-start; }
+  .smscard { border:1.5px dashed #c9ccd4; border-radius:16px; padding:12px 14px; display:flex; flex-direction:column; gap:8px; font-size:13.5px; color:#3d4350; } .smscard b { font:800 14px var(--head); }
+  .smslink { display:inline-flex; align-items:center; justify-content:center; height:46px; border-radius:14px; background:#0b0b0f; color:#fff; font:700 15px var(--head); text-decoration:none; }
   [hidden] { display:none !important; }
   @media (min-width:431px) { #app { box-shadow:0 0 0 1px var(--line); } }
 </style>
@@ -136,6 +143,7 @@
         <span><b id="safeLabel"></b><small id="safeHint"></small></span>
       </button>
     </div>
+    <div id="bcBanners"></div>
     <h1 id="hTitle"></h1>
     <p class="lead" id="hLead"></p>
     <div class="tiles" id="tiles"></div>
@@ -151,6 +159,7 @@
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5f6470" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
     </button>
     <div class="foot"><span class="dot" id="netDot"></span><span id="netText"></span></div>
+    <div id="smsHome" style="margin-top:10px"></div>
     <div class="langs" id="langs"></div>
   </section>
 
@@ -178,6 +187,17 @@
     <div class="spacer"></div>
     <button id="cdCancel"></button>
     <div class="cdnote" id="cdNote"></div>
+  </div>
+
+  <!-- ============ DISPATCHER BROADCAST ============ -->
+  <div id="bcOverlay" role="alertdialog" aria-modal="true" aria-labelledby="bcTitle" aria-live="assertive">
+    <div class="safesheet">
+      <span class="tag" id="bcTag"></span>
+      <h3 id="bcTitle"></h3>
+      <div class="warnbox" id="bcBody"></div>
+      <button class="primary" id="bcRoute" style="flex:none;width:100%" hidden></button>
+      <button class="outline" id="bcAck"></button>
+    </div>
   </div>
 
   <!-- ============ PRIORITY PROFILE ============ -->
@@ -296,6 +316,7 @@ function netLabel() {
   const on = navigator.onLine;
   $('netDot').className = `dot ${on ? '' : 'off'}`;
   $('netText').textContent = on ? tr('m.online') : tr('m.offline');
+  renderSmsHome();
 }
 addEventListener('online', () => { netLabel(); flush(); refresh(); });
 addEventListener('offline', netLabel);
@@ -307,6 +328,7 @@ function gpsLabel() {
   $('gpsDot').className = 'dot';
   const where = d ? name(d.name) : '';
   $('gpsText').textContent = manual ? where || tr('ui.district') : `${where ? where + ' · ' : ''}GPS ±${Math.round(acc ?? 0)} ${tr('ui.meters')}`;
+  renderSmsHome(); // the SMS template must carry the current location
 }
 function nearestDistrictId(p) {
   let best = null; let bd = Infinity;
@@ -336,12 +358,13 @@ async function refresh() {
     const roads = await api('GET', '/api/roads').catch(() => null);
     if (roads) window.__roads = roads;
     renderAll();
+    pollBroadcasts();
   } catch { /* keep last data when offline */ }
 }
 setInterval(refresh, 5000);
 const bestPoint = () => rec?.points.find((p) => p.id === rec.recommendedPointId) ?? null;
 
-function renderAll() { renderHomeRow(); renderRoute(); if (app.dataset.screen === 'sent') renderSent(); }
+function renderAll() { renderHomeRow(); renderRoute(); renderBroadcasts(); if (app.dataset.screen === 'sent') renderSent(); }
 
 function renderHomeRow() {
   const b = bestPoint(); const sub = $('rowSub');
@@ -477,17 +500,20 @@ function renderSent() {
   const mm = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, '0')}`;
   const b = bestPoint();
   const step = (n, text, extra) => {
-    const cls = stage >= n + 1 ? 'done' : stage === n ? 'now' : 'todo'; const mark = stage >= n + 1 ? '✓' : stage === n ? '●' : '';
+    const idx = stage - 1; // stage 2 = "assigning" = step index 1, stage 3 = on the way, stage 4 = arrived
+    const cls = n < idx ? 'done' : n === idx ? 'now' : 'todo'; const mark = n < idx ? '✓' : n === idx ? '●' : '';
     return `<div class="step ${cls}"><div class="m">${mark}</div><div class="w">${esc(text)}</div><small>${esc(extra)}</small></div>`;
   };
-  const eta = sosInfo?.etaMin ? ` · ~${sosInfo.etaMin} ${tr('ui.eta')}` : '';
+  const etaLeft = sosInfo?.etaSec != null ? Math.max(0, sosInfo.etaSec - Math.floor((Date.now() - sosInfo._at) / 1000)) : null;
+  const eta = etaLeft != null ? ` · ${Math.floor(etaLeft / 60)}:${String(etaLeft % 60).padStart(2, '0')}` : sosInfo?.etaMin ? ` · ~${sosInfo.etaMin} ${tr('ui.eta')}` : '';
   const prio = (sosInfo?.priority ?? current.priority) === 1;
   el.innerHTML = `
     <div class="miniTop"><div class="chip" style="pointer-events:none"><span class="dot ${navigator.onLine ? '' : 'off'}"></span>${esc($('gpsText').textContent)}</div></div>
     <div class="hero ${queued ? 'queued' : ''}"><div class="badge">${queued ? svg('M12 8v5l3 2 M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z', '#9a5b00', 44, 2.2) : svg('M5 12.5l4.5 4.5L19 7.5', '#0b7a42', 44, 2.4)}</div>
       <h2>${esc(queued ? tr('m.queuedTitle') : tr('m.sentTitle'))}</h2>${prio ? `<div class="prio">♿ ${esc(tr('m.priority'))}</div>` : ''}<p>${esc(queued ? tr('m.queuedBody') : tr('m.sentBody'))}${prio && !queued ? ' ' + esc(tr('m.priorityNote')) : ''}</p></div>
+    ${queued ? smsCard(type) : ''}
     <div class="box"><div class="hd"><span style="display:flex;align-items:center;gap:10px">${svg(IC[type], TONE[type][1], 24)}${esc(tr('sos.' + type))}</span><small>${esc(time)}</small></div>
-      ${queued ? '' : `<div class="sep"></div>${step(0, tr('m.step1'), stage >= 1 ? time.slice(0, 5) : '')}${step(1, prio ? tr('m.transportAssign') : tr('m.step2'), stage === 2 ? tr('m.now') : '')}${step(2, (prio ? tr('m.transportOnWay') : tr('m.step3')) + eta, '')}`}</div>
+      ${queued ? '' : `<div class="sep"></div>${step(0, tr('m.step1'), stage >= 1 ? time.slice(0, 5) : '')}${step(1, prio ? tr('m.transportAssign') : tr('m.step2'), stage === 2 ? tr('m.now') : '')}${step(2, (prio ? tr('m.transportOnWay') : tr('m.step3')) + (stage === 3 ? eta : ''), '')}${step(3, prio ? tr('m.transportArrived') : tr('m.step4'), '')}`}</div>
     ${b ? `<div class="card"><div class="eyebrow" style="color:#0066cc">${esc(tr('m.safeExit'))}</div><div style="font:800 18px var(--head);letter-spacing:-0.03em">${esc(name(b.name))} · ${b.route.distanceM} ${esc(tr('ui.meters'))}</div>
       <button class="primary" id="sentRoute" style="flex:none;width:100%">${svg(NAV, '#fff', 18, 2.2)}${esc(tr('m.showRoute'))}</button></div>` : ''}
     <div class="spacer"></div>
@@ -503,9 +529,73 @@ function renderSent() {
     try { await api('POST', `/api/sos/${current.id}/cancel`, { body: { citizenId: citizenId() } }); current = null; lsSet('currentSos', null); toast(tr('m.cancelled')); go('home'); }
     catch (e) { toast(e.message, true); }
   });
-  if (left > 0) sentTimer = setTimeout(renderSent, 1000);
+  if (left > 0 || (stage === 3 && etaLeft != null)) sentTimer = setTimeout(renderSent, 1000);
 }
 setInterval(() => { if (current?.id && app.dataset.screen === 'sent') pollSos(); }, 4000);
+
+// ------------------------------------------------------------------ SMS fallback (no internet)
+let smsNumber = lsGet('smsNumber', '1234');
+api('GET', '/api/config').then((c) => { if (c.sms?.number) { smsNumber = c.sms.number; lsSet('smsNumber', smsNumber); } }).catch(() => {});
+const SMS_KW = { FIRE: 'YANGIN', COLLAPSE: 'DAGINTI', FLOOD: 'SEL', MEDICAL: 'TIBBI' };
+const NEED_KW = { wheelchair: 'ELIL', reduced_mobility: 'YERIMIR', medical_transport: 'NEQLIYYAT' };
+const fmtT = (key, vars) => Object.entries(vars).reduce((t, [k, v]) => t.replace(`{${k}}`, v), tr(key));
+function smsBody(type) {
+  const where = pos ? `${pos.lat.toFixed(5)},${pos.lng.toFixed(5)}` : $('district').value;
+  return `SOS ${SMS_KW[type] ?? 'TIBBI'}${isPriority() ? ' ' + profile.needs.map((n) => NEED_KW[n]).join(' ') : ''} ${where}`.trim();
+}
+const smsHref = (type) => `sms:${smsNumber}?&body=${encodeURIComponent(smsBody(type))}`;
+function smsCard(type) {
+  return `<div class="smscard"><b>${esc(tr('m.sms.title'))}</b><span>${esc(fmtT('m.sms.hint', { number: smsNumber, sample: smsBody(type) }))}</span><a class="smslink" href="${smsHref(type)}">${esc(tr('m.sms.btn'))}</a></div>`;
+}
+function renderSmsHome() {
+  const el = $('smsHome');
+  if (navigator.onLine) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="smscard"><b>${esc(tr('m.sms.title'))}</b><span>${esc(fmtT('m.sms.hint', { number: smsNumber, sample: smsBody('MEDICAL') }))}</span>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">${Object.keys(SMS_KW).map((k) => `<a class="smslink" href="${smsHref(k)}">${esc(tr('sos.' + k))}</a>`).join('')}</div></div>`;
+}
+
+// ------------------------------------------------------------------ dispatcher broadcasts (pull: we send our position, the server never stores it)
+const bcKey = (b) => `${b.id}@${b.createdAt}`; // ids restart with the server: the timestamp keeps a new notice from looking "already read"
+const bcAcked = new Set(lsGet('bcAcked', []));
+const bcAnnounced = new Set();
+let bcList = [];
+const bcHead = (b) => (b.type === 'custom' ? tr('bc.custom.title') : tr('bc.' + b.type + '.title').replace('{point}', b.point ? name(b.point.name) : ''));
+const bcText = (b) => (b.type === 'custom'
+  ? b.text[state.lang] ?? b.text.en ?? b.text.az ?? b.text.ru ?? ''
+  : tr('bc.' + b.type + '.body') + (b.substituted ? ' ' + tr('bc.evacuate.substituted') : ''));
+async function pollBroadcasts() {
+  try {
+    const q = [pos && `lat=${pos.lat}&lng=${pos.lng}`, isPriority() && 'accessible=1'].filter(Boolean).join('&');
+    bcList = (await api('GET', `/api/broadcasts${q ? '?' + q : ''}`)).broadcasts;
+    renderBroadcasts();
+  } catch { /* offline: keep what we have */ }
+}
+setInterval(pollBroadcasts, 5000);
+function ackBc(b, thenRoute = false) {
+  bcAcked.add(bcKey(b)); lsSet('bcAcked', [...bcAcked].slice(-100));
+  api('POST', `/api/broadcasts/${b.id}/ack`).catch(() => {});
+  renderBroadcasts();
+  if (thenRoute && b.point) { app.dataset.prev = ''; go('route'); }
+}
+function renderBroadcasts() {
+  const pending = bcList.filter((b) => !bcAcked.has(bcKey(b)));
+  const crit = pending.find((b) => b.severity === 'critical');
+  const counting = $('countdown').classList.contains('on'); // never cover the 3-second SOS cancel button
+  if (crit && !counting) {
+    $('bcTag').textContent = tr('bc.severity.critical');
+    $('bcTitle').textContent = bcHead(crit); $('bcBody').textContent = bcText(crit);
+    $('bcAck').textContent = tr('bc.ack');
+    const showRoute = crit.type === 'evacuate' && crit.point;
+    $('bcRoute').hidden = !showRoute; $('bcRoute').textContent = tr('m.showRoute');
+    $('bcAck').onclick = () => ackBc(crit); $('bcRoute').onclick = () => ackBc(crit, true);
+    $('bcOverlay').classList.add('on');
+    if (!bcAnnounced.has(bcKey(crit))) { bcAnnounced.add(bcKey(crit)); buzz([250, 120, 250, 120, 500]); }
+  } else $('bcOverlay').classList.remove('on');
+  const rest = pending.filter((b) => b !== crit);
+  $('bcBanners').innerHTML = rest.map((b, i) => `<div class="bcbanner ${b.severity === 'info' ? 'info' : ''}" role="status"><b>${esc(bcHead(b))}</b><span>${esc(bcText(b))}</span><button data-bc="${i}">${esc(tr('bc.ack'))}</button></div>`).join('');
+  $('bcBanners').querySelectorAll('[data-bc]').forEach((el) => el.addEventListener('click', () => ackBc(rest[Number(el.dataset.bc)])));
+  for (const b of rest) if (!bcAnnounced.has(bcKey(b))) { bcAnnounced.add(bcKey(b)); buzz([120, 80, 120]); }
+}
 
 // ------------------------------------------------------------------ priority-SOS profile (reduced mobility / special care)
 function renderProfileRow() {

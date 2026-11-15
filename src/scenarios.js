@@ -2,7 +2,7 @@
 // (addSos -> abuse guard -> crisis rules), nothing is faked at the dashboard level.
 import { AppError } from './errors.js';
 
-export const SCENARIO_NAMES = ['priority_sos', 'cluster', 'fake_flood', 'mass_event', 'filling', 'overcrowd', 'api_outage', 'road_block', 'reset'];
+export const SCENARIO_NAMES = ['priority_sos', 'sms_sos', 'broadcast_demo', 'cluster', 'fake_flood', 'mass_event', 'filling', 'overcrowd', 'api_outage', 'road_block', 'reset'];
 
 // tiny deterministic PRNG so a scenario looks the same every run
 function rng(seed) {
@@ -13,7 +13,7 @@ const jitter = (r, m) => (r() - 0.5) * 2 * m; // metres -> degrees below (approx
 const DEG = 1 / 111_000;
 const TYPES = ['FIRE', 'COLLAPSE', 'FLOOD', 'MEDICAL'];
 
-export function runScenario(name, { store, graph, resetAll }) {
+export function runScenario(name, { store, graph, resetAll, sms, broadcasts }) {
   if (!SCENARIO_NAMES.includes(name)) throw new AppError(404, 'SCENARIO_NOT_FOUND');
   const r = rng(Date.now() & 0xffff);
   const now = store.now();
@@ -30,6 +30,14 @@ export function runScenario(name, { store, graph, resetAll }) {
       );
       return { name, count: 1 };
     }
+    case 'sms_sos': {
+      // four different phone numbers text the gateway about the same district (no internet involved)
+      const replies = [];
+      for (let i = 0; i < 4; i++) replies.push(sms.handle({ from: `+99450111${String(2200 + i)}`, text: 'SOS YANGIN YASAMAL' }).reply);
+      return { name, count: 4, sample: replies[0] };
+    }
+    case 'broadcast_demo':
+      return { name, broadcast: broadcasts.create({ type: 'evacuate', target: { kind: 'districts', districts: ['nasimi'] }, pointId: 'p5' }, 'admin').id };
     case 'cluster': {
       const d = district('nasimi');
       for (let i = 0; i < 4; i++) {

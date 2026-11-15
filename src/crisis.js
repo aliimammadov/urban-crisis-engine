@@ -18,6 +18,9 @@ export const DEFAULT_RULES = Object.freeze({
   overcrowdCooldownMs: 5 * 60_000, // after approval, no new overcrowd alert for the same point...
   overcrowdForcePct: 98,      // ...unless it gets this full
   forecastHorizonMin: 10,     // warn when a point will pass overcrowdPct within this many minutes
+  // --- brigade lifecycle ---
+  brigadeTimeScale: 1,        // demo speed-up: 10 = everything on the road happens 10x faster
+  onSceneMs: 5 * 60_000,      // how long a brigade works at the scene before returning
 });
 
 export const ALERT_ACTION = 'RED_DISPATCH_AND_OPEN_POINT';
@@ -260,8 +263,43 @@ export class CrisisEngine {
     return best;
   }
 
+  #scale() { return Math.max(0.1, this.rules.brigadeTimeScale || 1); }
+
   #eta(distanceM) {
-    return Math.max(1, Math.round(distanceM / this.rules.brigadeSpeedMPerMin));
+    return Math.max(1, Math.round(distanceM / this.rules.brigadeSpeedMPerMin / this.#scale()));
+  }
+
+  #travelMs(distanceM) {
+    return Math.max(3000, (distanceM / this.rules.brigadeSpeedMPerMin) * 60_000 / this.#scale());
+  }
+
+  /**
+   * Brigade lifecycle: dispatched (moving) -> on_scene -> returning (moving) -> available.
+   * Called every second by the app; cheap when nothing moves. Emits a change while anything is in motion
+   * so dashboards animate smoothly.
+   */
+  tickBrigades() {
+    const now = this.store.now();
+    let moving = false;
+    let transitioned = false;
+    for (const b of this.store.brigades.values()) {
+      if (b.status === 'dispatched' && b.move) {
+        moving = true;
+        if (now >= b.move.startedAt + b.move.durationMs) { b.status = 'on_scene'; b.onSceneAt = now; delete b.move; transitioned = true; }
+      } else if (b.status === 'on_scene' && b.onSceneAt != null && b.alertId) {
+        if (now - b.onSceneAt >= this.rules.onSceneMs / this.#scale()) {
+          const dur = b.travelMs ?? 3000;
+          b.status = 'returning';
+          b.move = { from: { ...b.target }, to: { ...b.home }, startedAt: now, durationMs: dur };
+          transitioned = true; moving = true;
+        }
+      } else if (b.status === 'returning' && b.move) {
+        moving = true;
+        if (now >= b.move.startedAt + b.move.durationMs) { this.store.resetBrigade(b); transitioned = true; }
+      }
+    }
+    if (moving || transitioned) this.store.emit('change', 'brigade');
+    return { moving, transitioned };
   }
 
   /** One-click decision: dispatch nearest free brigade + open nearest reserve assembly point. */
@@ -274,9 +312,13 @@ export class CrisisEngine {
     const p = this.plan(alert);
     const b = p.brigade ? this.store.brigades.get(p.brigade.id) : null;
     if (b) {
+      const dist = haversine(b.home, alert.center);
       b.status = 'dispatched';
       b.target = { ...alert.center };
       b.alertId = alert.id;
+      b.travelMs = this.#travelMs(dist);
+      b.move = { from: { ...b.home }, to: { ...alert.center }, startedAt: this.store.now(), durationMs: b.travelMs };
+      delete b.onSceneAt;
     }
     const np = p.point ? this.store.points.get(p.point.id) : null;
     if (np) np.active = true; // priority alerts have no point to open (they dispatch accessible transport)
@@ -299,7 +341,7 @@ export class CrisisEngine {
     if (this.store.now() - alert.approvedAt > this.rules.undoWindowMs) throw new AppError(409, 'UNDO_EXPIRED');
 
     const b = this.store.brigades.get(alert.result.brigadeId);
-    if (b && b.alertId === alert.id) { b.status = 'available'; delete b.target; delete b.alertId; }
+    if (b && b.alertId === alert.id) this.store.resetBrigade(b);
     const np = this.store.points.get(alert.result.openedPointId);
     if (np && np.occupied === 0) np.active = false;
 

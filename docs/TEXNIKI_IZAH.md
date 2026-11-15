@@ -90,7 +90,19 @@ Etibarlı kompromis: əgər təhlükəli bir saxtakar çoxlu real IP-dən təsdi
 
 **Etibar məsələsi.** Rol özü-bəyandır (əlilliyi sistem yoxlaya bilməz). Sui-istifadə riskini azaldan: yalnız imzalı cihaz, eyni karantin/bot müdafiəsi, dispetçerə "özü bəyan edib" yazılması. Real yerləşdirmədə rolun sosial müdafiə reyestri ilə təsdiqi əlavə edilə bilər.
 
-### 5.7 Zaman maşını (`history.js`)
+### 5.7 Briqada həyat dövrü (`crisis.js`, `store.js`)
+Təsdiqdən sonra briqada "göndərilir" statusunda donub qalmır: `dispatched` (xəritədə baza → hadisə yerinə hərəkət, canlı ETA geri sayımı və irəliləmə zolağı) → `on_scene` (hadisə yerində, `onSceneMs`) → `returning` (geri hərəkət) → `available`. Gediş vaxtı məsafə / sürət əsasında hesablanır. Mövqe vaxta görə interpolyasiya olunur (store-da yalnız hərəkətin başlanğıcı və müddəti saxlanır), ona görə snapshot istənilən anda dəqiq mövqe verir. Qayıdan briqada yeni tapşırıq üçün azad sayılmır. Geri qaytarma (`undo`) briqadanı bazaya qaytarır. `brigadeTimeScale` qaydası (dispetçer panelində x1/x5/x10/x30) bütün missiyanı demo üçün sürətləndirir. Vətəndaş ekranında addımlar: dispetçerə çatdı → briqada təyin olunur → yardım yoldadır **(canlı ETA)** → yardım yerindədir. Zaman maşını kadrlarına briqada mövqeləri də yazılır.
+
+### 5.8 Qərar jurnalı (`audit.js`)
+Dispetçerin hər qərarı (təsdiq, geri qaytarma, SOS buraxma, yol, briqada statusu, bildiriş, admin əməliyyatları) və sistemin həyəcan yaratması jurnala düşür: kim (rol), nə vaxt, nəyi, hansı nəticə ilə. Jurnalda **IP, token və vətəndaş kimliyi yoxdur** (testlə yoxlanılır), buna görə dispetçer panelində göstərilə bilir. Uğursuz (rədd edilən) cəhdlər qərar kimi yazılmır. `GET /api/decisions` və dashboard snapshot-ı son qərarları verir.
+
+### 5.9 Dispetçerdən kütləvi bildiriş (`broadcast.js`)
+Dispetçer vətəndaşlara **təxliyyə** (xüsusi məntəqəyə köçün), **sığınma**, **ərazidən uzaq durun**, **təhlükə sona çatdı** və ya **fərdi mətn** göndərir. Hədəf: bütün şəhər, rayon və ya radius (həyəcan ətrafı). Bildiriş vətəndaşın dilində şablondan yaranır (fərdi mətn üçün az/en/ru sahələri). Tətbiq 5 saniyədən bir öz koordinatı ilə sorğu edir (pull modeli), **server vətəndaşın yerini saxlamır**. Kritik bildiriş (təxliyyə) tam ekran pəncərə kimi çıxır və SOS geri sayımını örtmür. Digərləri ana ekranda banner kimi görünür, "Oxudum" düyməsi var. **Əlçatan istifadəçi** (prioritet rol) üçün pandussuz məntəqə avtomatik ən yaxın əlçatan məntəqə ilə əvəz olunur. "Təhlükə sona çatdı" əhatə etdiyi xəbərdarlıqları ləğv edir (rayon üzrə olan şəhər miqyaslı xəbərdarlığı ləğv etmir). Dispetçerdə hər bildiriş üçün "çatdı" (sorğu edən fərqli cihaz) və "oxudu" sayğacları var, aktiv bildiriş geri çəkilə bilər.
+
+### 5.10 SMS ehtiyatı (`sms.js`)
+İnternet olmayanda vətəndaş qısa nömrəyə SMS göndərir, gateway (burada simulyasiya) `POST /api/sms/inbound` webhook-unu çağırır (`X-Gateway-Key` tələb olunur) və cavab mətnini qaytarır. Komandalar (diakritikasız/böyük-kiçik hərfə həssas deyil, az və ya en): `SOS [növ] [ehtiyac] <rayon | lat,lng>`, `TEHLUKESIZEM`, `YER <rayon>`. Növ verilməsə tibbi sayılır, yer başa düşülməsə cavabla soruşulur. Əlil arabası kimi ehtiyac sözləri SOS-u Kritik Prioritet #1 edir. **Telefon nömrəsi heç yerdə saxlanılmır**: yalnız duzlu hash anonim identifikator kimi işlədilir (eyni nömrə həmişə eyni id). Nömrə üzrə sürət limiti var (dəqiqədə 3). SMS ilə gələn SOS təsdiqli sayılır, gateway ünvanı bot "IP təmərküzü" kimi qiymətləndirilmir. Mobil tətbiq offline olanda növ düymələri ilə **hazır doldurulmuş `sms:` linkləri** göstərir (mətndə cari koordinat var).
+
+### 5.11 Zaman maşını (`history.js`)
 Hadisə zamanı (1 san. ərzində bir dəfə) və hər 5 saniyədən bir kompakt kadr yazılır: məntəqə doluluqları, SOS koordinatları (kadra ≤150), həyəcanlar, briqadalar, bağlı yollar. İdentifikatorlar kadra düşmür. Dispetçer son 2 saatı sürüşdürə və ya oynada, "həyəcan necə yarandı" göstərə bilər.
 
 ## 6. İstifadəçi interfeysi
@@ -102,7 +114,7 @@ Dizayn istiqaməti: DevLink-in təmiz dili (`#0071e3`, Plus Jakarta Sans/Inter, 
 - Dispetçer: təsdiqdən əvvəl nəticə önbaxışı, 10 san. geri qaytarma, karantin siyahısı + "Burax", hücum/artım xəbərdarlığı, ssenari paneli, zaman maşını.
 
 ## 7. Keyfiyyət və test
-- **264 açar/dil, 116 avtomatik test** (`npm test`, ~0,5 san.): alqoritm sərhəd halları (dəqiq 95%, eyni şəxsin təkrar SOS-u, 5 dəqiqədən köhnə SOS), idempotentlik, geri qaytarma, marşrut ehtiyatı, auth/rollar, sürət limiti, saxta SOS ssenariləri, real kütləvi hadisədə heç kimin bloklanmaması, OpenAPI ilə real marşrut cədvəlinin uyğunluğu, dillərin eyni açar dəstinə malik olması.
+- **352 açar/dil, 144 avtomatik test** (`npm test`, ~0,5 san.): alqoritm sərhəd halları (dəqiq 95%, eyni şəxsin təkrar SOS-u, 5 dəqiqədən köhnə SOS), idempotentlik, geri qaytarma, marşrut ehtiyatı, auth/rollar, sürət limiti, saxta SOS ssenariləri, real kütləvi hadisədə heç kimin bloklanmaması, OpenAPI ilə real marşrut cədvəlinin uyğunluğu, dillərin eyni açar dəstinə malik olması.
 - **Yük testi** (`npm run load`, lokal, 50 paralel, SOS + təxliyyə sorğusu qarışığı): ~5 000+ sorğu/san., p95 ≈ 16 ms.
 - Dispetçer paneli real Chrome-da (başsız rejim) ssenarilərlə yoxlanılıb. Mobil ana ekran render yoxlanılıb; geri sayım, "göndərildi" və təsdiq ekranlarının əl ilə klik testi aparılmayıb.
 - `Dockerfile` və `docker-compose.yml` hazırdır; image-in tərkibi və healthcheck əmri təmiz qovluqda əl ilə təkrarlanıb, lakin bu maşında Docker daemon işləmədiyi üçün **image real build edilməyib**.
@@ -123,6 +135,7 @@ Dizayn istiqaməti: DevLink-in təmiz dili (`#0071e3`, Plus Jakarta Sans/Inter, 
 | Xarici API kəsintisi/yavaşlığı | Avtomatik ehtiyat marşrut, vətəndaşa bildirilir. Ssenari: `api_outage` |
 | Yüksək yük | Sürət limitləri, fokuslu qiymətləndirmə, SSE birləşdirmə, flood zamanı təhlil throttle. Ssenari: `fake_flood`, `mass_event` |
 | Təhlükəsizlik tələbi | İmzalı sessiyalar, "Təhlükəsizlik rejimi" (`requireVerified`) iş vaxtı bir düymə ilə, rol/icazə |
+| Dispetçerdən kütləvi bildiriş / SMS ehtiyatı / qərar jurnalı | `broadcast.js`, `sms.js`, `audit.js` (5.8 – 5.10). Ssenarilər: `broadcast_demo`, `sms_sos` |
 | Yeni hədd/qayda | `POST /api/sim/rules` (açar və tip yoxlanılır) |
 | Yeni SOS növü | `SOS_TYPES` (`store.js`) + `sos.*` açarları |
 
@@ -132,6 +145,7 @@ Dizayn istiqaməti: DevLink-in təmiz dili (`#0071e3`, Plus Jakarta Sans/Inter, 
 - Əlçatanlıq məlumatı (məntəqələrdə pandus/lift, yol seqmentlərində pilləsizlik) simulyasiyadır, real sidewalk məlumatı yoxdur. Əlçatan marşrutun ETA-sı piyada sürəti ilə təxmin edilir. Prioritet rol özü-bəyandır.
 - Cihaz kimliyi telefon/OTP ilə bağlı deyil. Saxtakar ayrı IP-lərdən çoxlu imzalı cihaz yaradıb gözləyərsə, müdafiəni keçə bilər. IP əsaslı təhlil CGNAT arxasında zəifdir (buna görə təqsirkar yalnız imzasız və ya yeni cihazlar sayılır).
 - Xəritə plitələri OpenStreetMap-dən yüklənir (internetsiz xəritə fonu boş görünür, marşrutlar və məntəqələr isə çəkilir). Leaflet lokaldır.
+- SMS gateway simulyasiyadır (real operator inteqrasiyası yoxdur). SMS-də yer (rayon və ya koordinat) verilməsə SOS yaradılmır, cavabla yer soruşulur. Kütləvi bildiriş "pull" modelidir: tətbiq açıq olmayanda push bildirişi göndərilmir (real yerləşdirmədə Web Push/FCM lazımdır).
 - Dolma sürəti xətti ekstrapolyasiyadır. Qəfil dəyişikliklərdə (axın dayanması) proqnoz gec yenilənir (5 dəqiqəlik pəncərə).
 
 ## 10. Gələcək inkişaf

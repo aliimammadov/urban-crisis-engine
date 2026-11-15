@@ -17,6 +17,11 @@ import { SCENARIO_NAMES, runScenario } from './scenarios.js';
 import { History } from './history.js';
 import { buildOpenApi, renderDocs } from './openapi.js';
 import { normalizeProfile, sanitizeNeeds } from './priority.js';
+import { Audit } from './audit.js';
+import { Broadcasts } from './broadcast.js';
+import { SmsService } from './sms.js';
+import { isValidCoord } from './geo.js';
+import { timingSafeEqual } from 'node:crypto';
 import { AbuseGuard } from './abuse.js';
 import { dict, resolveLang, t } from './i18n.js';
 
@@ -42,6 +47,9 @@ export function createApp({
   tokenSecret,
   tickMs = 5000,
   historyMs = 5000,
+  moveMs = 1000,
+  smsGatewayKey = process.env.SMS_GATEWAY_KEY || 'sms-demo',
+  smsNumber = process.env.SMS_NUMBER || '1234',
   trustProxy = process.env.TRUST_PROXY === '1',
 } = {}) {
   const store = new Store(data, { now, cancelWindowMs });
@@ -52,13 +60,28 @@ export function createApp({
   const sessions = new Sessions(tokenSecret);
   const guard = new AbuseGuard(store, () => crisis.rules);
   store.guard = guard;
-  const snapshot = () => crisis.decorate(store.snapshot());
+  const audit = new Audit({ now });
+  const broadcasts = new Broadcasts(store, { now });
+  const smsLimiter = new RateLimiter({ capacity: limits.smsBurst ?? 3, refillPerSec: limits.smsPerSec ?? 0.05, now });
+  const sms = new SmsService(store, { secret: sessions.secret, limiter: smsLimiter });
+  const snapshot = () => {
+    const snap = crisis.decorate(store.snapshot());
+    snap.decisions = audit.recent(12);
+    snap.broadcasts = broadcasts.recent(8);
+    return snap;
+  };
+  store.on('alert', (a) => audit.record({ actor: 'system', action: 'alert.created', target: a.id, details: { type: a.type, level: a.level, priority: a.priority ?? null } }));
+  store.on('change', (kind) => { if (kind === 'reset') broadcasts.clear(); });
 
   const history = new History(store, graph);
   store.on('change', (kind) => { if (kind === 'reset') history.clear(); history.record(); }); // event-driven (throttled)
   history.record({ force: true });
   const histTimer = historyMs > 0 ? setInterval(() => history.record({ force: true }), historyMs) : null;
   histTimer?.unref();
+
+  // Brigade lifecycle (moving -> on scene -> returning): 1 s resolution, cheap when idle.
+  const moveTimer = moveMs > 0 ? setInterval(() => crisis.tickBrigades(), moveMs) : null;
+  moveTimer?.unref();
 
   // Time-driven pass: forecasts/expiries depend on the clock, not only on incoming events.
   const ticker = tickMs > 0 ? setInterval(() => crisis.tick(), tickMs) : null;
@@ -99,7 +122,7 @@ export function createApp({
   route('GET', '/api/docs', () => ({ raw: true, status: 200, contentType: 'text/html; charset=utf-8', body: renderDocs() }));
   route('GET', '/api/health', () => ({ ok: true, time: now() }));
   route('GET', '/api/i18n/:lang', (c) => ({ lang: resolveLang(c.params.lang), messages: dict[resolveLang(c.params.lang)] }));
-  route('GET', '/api/config', () => ({ sosTypes: SOS_TYPES, languages: Object.keys(dict), rules: crisis.rules }));
+  route('GET', '/api/config', () => ({ sosTypes: SOS_TYPES, languages: Object.keys(dict), rules: crisis.rules, sms: { number: smsNumber } }));
   route('GET', '/api/districts', () => store.districts);
   route('GET', '/api/points', () => store.listPoints({ activeOnly: true }));
   route('GET', '/api/roads', () => graph.listEdges());
@@ -157,46 +180,75 @@ export function createApp({
     const frames = history.since(Number(c.url.searchParams.get('minutes')) || 120);
     return { frames, t0: frames[0]?.t ?? null, t1: frames.at(-1)?.t ?? null, everyMs: 5000 };
   });
-  route('POST', '/api/alerts/:id/approve', { perm: 'alert:approve' }, (c) => crisis.approve(c.params.id, c.role));
-  route('POST', '/api/sos/:id/release', { perm: 'alert:approve' }, (c) => {
+  route('POST', '/api/alerts/:id/approve', { perm: 'alert:approve', audit: 'alert.approve', details: (o) => ({ type: o.type, brigadeId: o.result?.brigadeId ?? null, openedPointId: o.result?.openedPointId ?? null, etaMin: o.result?.etaMin ?? null }) }, (c) => crisis.approve(c.params.id, c.role));
+  route('POST', '/api/sos/:id/release', { perm: 'alert:approve', audit: 'sos.release' }, (c) => {
     const s = guard.release(c.params.id);
     store.emit('change', 'sos', s); // re-run crisis rules: a released SOS may now complete a cluster
     return store.publicSos(s);
   });
-  route('POST', '/api/alerts/:id/undo', { perm: 'alert:approve' }, (c) => crisis.undo(c.params.id));
-  route('POST', '/api/roads/:id/close', { perm: 'road:write' }, (c) => setRoad(c.params.id, true));
-  route('POST', '/api/roads/:id/open', { perm: 'road:write' }, (c) => setRoad(c.params.id, false));
-  route('POST', '/api/roads/:id/accessibility', { perm: 'road:write' }, (c) => {
+  route('POST', '/api/alerts/:id/undo', { perm: 'alert:approve', audit: 'alert.undo' }, (c) => crisis.undo(c.params.id));
+  route('POST', '/api/roads/:id/close', { perm: 'road:write', audit: 'road.close' }, (c) => setRoad(c.params.id, true));
+  route('POST', '/api/roads/:id/open', { perm: 'road:write', audit: 'road.open' }, (c) => setRoad(c.params.id, false));
+  route('POST', '/api/roads/:id/accessibility', { perm: 'road:write', audit: 'road.accessibility', details: (o) => ({ stepFree: o.stepFree }) }, (c) => {
     const e = graph.setStepFree(c.params.id, c.body.stepFree !== false);
     if (!e) throw new AppError(404, 'ROAD_NOT_FOUND');
     store.emit('change', 'road');
     return { id: e.id, stepFree: e.stepFree };
   });
-  route('POST', '/api/roads/:id/congestion', { perm: 'road:write' }, (c) => {
+  route('POST', '/api/roads/:id/congestion', { perm: 'road:write', audit: 'road.congestion' }, (c) => {
     const e = graph.setCongestion(c.params.id, Number(c.body.factor));
     if (!e) throw new AppError(404, 'ROAD_NOT_FOUND');
     store.emit('change', 'road');
     return e;
   });
-  route('POST', '/api/brigades/:id/status', { perm: 'brigade:write' }, (c) => store.setBrigadeStatus(c.params.id, c.body.status));
+  route('POST', '/api/brigades/:id/status', { perm: 'brigade:write', audit: 'brigade.status', details: (o) => ({ status: o.status }) }, (c) => store.setBrigadeStatus(c.params.id, c.body.status));
 
   // admin simulation / ops
-  route('POST', '/api/sim/occupancy', { perm: '*' }, (c) => store.setOccupancy(c.body.pointId, Number(c.body.occupied)));
-  route('POST', '/api/sim/chaos', { perm: '*' }, (c) => {
+  route('POST', '/api/sim/occupancy', { perm: '*', audit: 'sim.occupancy', details: (o) => ({ pointId: o.id, occupied: o.occupied }) }, (c) => store.setOccupancy(c.body.pointId, Number(c.body.occupied)));
+  route('POST', '/api/sim/chaos', { perm: '*', audit: 'sim.chaos', details: (o) => ({ externalDown: o.externalDown, externalLatencyMs: o.externalLatencyMs }) }, (c) => {
     if (typeof c.body.externalDown === 'boolean') store.chaos.externalDown = c.body.externalDown;
     if (Number.isFinite(c.body.externalLatencyMs)) store.chaos.externalLatencyMs = Math.max(0, c.body.externalLatencyMs);
     store.emit('change', 'chaos');
     return store.chaos;
   });
-  route('POST', '/api/sim/rules', { perm: '*' }, (c) => crisis.setRules(c.body));
+  route('POST', '/api/sim/rules', { perm: '*', audit: 'sim.rules', details: (_o, body) => ({ keys: Object.keys(body ?? {}) }) }, (c) => crisis.setRules(c.body));
   route('GET', '/api/rules', { perm: 'dashboard' }, () => crisis.rules);
   const resetAll = () => {
     for (const e of graph.edges.values()) { e.closed = false; e.congestion = 1; }
     store.reset();
   };
-  route('POST', '/api/sim/reset', { perm: '*' }, () => { resetAll(); return { ok: true }; });
+  route('POST', '/api/sim/reset', { perm: '*', audit: 'sim.reset' }, () => { resetAll(); return { ok: true }; });
   route('GET', '/api/sim/scenarios', { perm: '*' }, () => SCENARIO_NAMES);
-  route('POST', '/api/sim/scenario', { perm: '*' }, (c) => runScenario(String(c.body.name ?? ''), { store, graph, resetAll }));
+  route('POST', '/api/sim/scenario', { perm: '*', audit: 'sim.scenario', details: (o) => ({ name: o.name }) }, (c) => runScenario(String(c.body.name ?? ''), { store, graph, resetAll, sms, broadcasts }));
+
+  // ---- decision journal ----
+  route('GET', '/api/decisions', { perm: 'dashboard' }, (c) => ({ decisions: audit.recent(Number(c.url.searchParams.get('limit')) || 30) }));
+
+  // ---- mass notification (dispatcher -> citizens) ----
+  const clientKey = (c) => sessions.verify(c.req.headers['x-device-token']) ?? c.ip;
+  route('GET', '/api/broadcasts', (c) => {
+    const q = c.url.searchParams;
+    const lat = q.has('lat') ? Number(q.get('lat')) : NaN;
+    const lng = q.has('lng') ? Number(q.get('lng')) : NaN;
+    const deviceId = sessions.verify(c.req.headers['x-device-token']);
+    const accessible = q.get('accessible') === '1' || store.getProfile(deviceId)?.role === 'priority';
+    return { broadcasts: broadcasts.forClient({ pos: isValidCoord(lat, lng) ? { lat, lng } : null, accessible, key: clientKey(c) }) };
+  });
+  route('POST', '/api/broadcasts/:id/ack', (c) => broadcasts.ack(c.params.id, clientKey(c)));
+  route('POST', '/api/broadcasts', { perm: 'broadcast:send', audit: 'broadcast.send', details: (o) => ({ id: o.id, type: o.type, severity: o.severity, target: o.target.kind }) },
+    (c) => ({ status: 201, body: broadcasts.create(c.body, c.role) }));
+  route('POST', '/api/broadcasts/:id/cancel', { perm: 'broadcast:send', audit: 'broadcast.cancel' }, (c) => broadcasts.cancel(c.params.id));
+
+  // ---- SMS fallback (simulated gateway) ----
+  const gatewayOk = (req) => {
+    const k = req.headers['x-gateway-key'];
+    return typeof k === 'string' && k.length === smsGatewayKey.length && timingSafeEqual(Buffer.from(k), Buffer.from(smsGatewayKey));
+  };
+  route('POST', '/api/sms/inbound', (c) => {
+    if (!gatewayOk(c.req)) throw new AppError(401, 'UNAUTHORIZED');
+    return sms.handle({ from: c.body.from, text: c.body.text });
+  });
+  route('POST', '/api/sim/sms', { perm: '*', audit: 'sim.sms' }, (c) => sms.handle({ from: c.body.from, text: c.body.text }));
 
   function setRoad(id, closed) {
     const e = graph.setClosed(id, closed);
@@ -292,6 +344,7 @@ export function createApp({
       const body = req.method === 'POST' ? await readBody(req) : {};
       const params = r.re.exec(url.pathname).groups ?? {};
       const out = await r.handler({ req, url, params, body, role, lang, ip });
+      if (r.opts.audit) audit.record({ actor: role, action: r.opts.audit, target: params.id ?? null, details: r.opts.details?.(out?.body ?? out, body) ?? {} });
       if (out?.raw) { res.writeHead(out.status, { 'Content-Type': out.contentType }); return res.end(out.body); }
       if (out && typeof out === 'object' && 'status' in out && 'body' in out) return send(res, out.status, out.body);
       return send(res, 200, out);
@@ -303,5 +356,5 @@ export function createApp({
   const server = http.createServer(handler);
   server.keepAliveTimeout = 5000;
   const routeTable = () => routes.map((r) => ({ method: r.method, path: r.path, perm: r.opts.perm ?? null }));
-  return { server, store, graph, history, routeTable, routing, evacuation, crisis, auth, handler };
+  return { server, store, graph, history, audit, broadcasts, sms, routeTable, routing, evacuation, crisis, auth, handler };
 }

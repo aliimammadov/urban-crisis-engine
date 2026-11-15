@@ -29,7 +29,7 @@ export class History {
       sosTotal: live.length,
       quarantined: open.length - live.length,
       alerts: s.alerts.filter((a) => a.status === 'open' || a.status === 'approved').slice(-20).map((a) => [a.id, a.type, a.level, a.status]),
-      brigades: [...s.brigades.values()].map((b) => [b.id, b.status]),
+      brigades: [...s.brigades.values()].map((b) => { const v = s.brigadeView(b); return [b.id, b.status, Math.round(v.lat * 1e5) / 1e5, Math.round(v.lng * 1e5) / 1e5]; }),
       closed: this.graph ? [...this.graph.edges.values()].filter((e) => e.closed).map((e) => e.id) : [],
     };
     this.frames.push(frame);

@@ -73,3 +73,23 @@ test('the language switch is wired in both apps and applies without a reload', (
   assert.match(mobile, /LANGS = \['az', 'en', 'ru'\]/);
   assert.match(disp, /<option value="en">EN<\/option>/);
 });
+
+test('dynamic key families added with the product features are translated (journal, broadcasts, SMS replies, lifecycle)', () => {
+  const app = readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
+  const actions = new Set([...app.matchAll(/audit: '([a-z_.]+)'/g)].map((m) => m[1]));
+  actions.add('alert.created');
+  assert.ok(actions.size >= 14, `found only ${actions.size} audit actions`);
+  for (const a of actions) for (const lang of ['az', 'en']) assert.ok(dict[lang][`audit.${a}`], `${lang}: audit.${a}`);
+
+  const smsKeys = new Set([...readFileSync(new URL('../src/sms.js', import.meta.url), 'utf8').matchAll(/'(sms\.[A-Za-z]+)'/g)].map((m) => m[1]));
+  assert.ok(smsKeys.size >= 8);
+  for (const k of smsKeys) for (const lang of ['az', 'en']) assert.ok(dict[lang][k], `${lang}: ${k}`);
+  for (const lang of ['az', 'en', 'ru']) for (const k of smsKeys) assert.equal(/\{[a-z]+\}/.test(dict[lang][k]) ? dict.az[k].match(/\{[a-z]+\}/g).sort().join() === dict[lang][k].match(/\{[a-z]+\}/g).sort().join() : true, true, `placeholders differ in ${lang}:${k}`);
+
+  const fam = {
+    'bc.type.': ['evacuate', 'shelter', 'avoid_area', 'all_clear', 'custom'], 'bc.severity.': ['critical', 'warning', 'info'],
+    'd.bc.': ['active', 'cancelled', 'expired'], 'brigade.': ['returning'], 'role.': ['system', 'dispatcher', 'admin', 'observer'],
+  };
+  for (const [p, vals] of Object.entries(fam)) for (const v of vals) for (const lang of ['az', 'en']) assert.ok(dict[lang][p + v], `${lang}: ${p}${v}`);
+  for (const t of ['evacuate', 'shelter', 'avoid_area', 'all_clear']) for (const part of ['title', 'body']) for (const lang of ['az', 'en']) assert.ok(dict[lang][`bc.${t}.${part}`], `${lang}: bc.${t}.${part}`);
+});

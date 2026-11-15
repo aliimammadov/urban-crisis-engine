@@ -48,6 +48,10 @@
   .replaybanner { position:absolute; left:50%; transform:translateX(-50%); top:12px; max-width:86%; text-align:center; z-index:1000; background:#fff4de; color:#6b3f00; border:1.5px solid #f2d596; border-radius:999px; padding:6px 14px; font-size:12.5px; font-weight:600; box-shadow:0 1px 3px rgba(0,0,0,.12); }
   .alert.priority { border-color:#7c3aed; background:#fbf9ff; box-shadow:0 0 0 3px rgba(124,58,237,.12); } .alert.priority .eyebrow { color:#43228a; } .alert.priority .eyebrow .d { background:#7c3aed; } .alert.priority .approve { background:#6d3fd8; }
   .need { background:#ede4ff; color:#43228a; border-radius:999px; padding:3px 10px; font-size:12px; font-weight:600; } .accfeat { background:#f3edff; color:#43228a; border-radius:999px; padding:1px 8px; font-size:11.5px; font-weight:600; margin-left:4px; }
+  .bcform { display:flex; flex-direction:column; gap:8px; margin-top:10px; } .bcform label { font-size:12px; font-weight:600; color:var(--muted); } .bcform select, .bcform textarea { width:100%; font:inherit; padding:7px 10px; border:1px solid var(--line); border-radius:10px; }
+  .bcprev { background:#f6f1ff; color:#43228a; border-radius:12px; padding:10px 12px; font-size:13.5px; line-height:1.4; min-height:20px; }
+  .bch { border:1px solid var(--line); border-radius:12px; padding:8px 10px; margin-bottom:8px; font-size:13px; } .bch b { display:block; } .bch .meta { color:var(--muted); font-size:12px; display:flex; justify-content:space-between; gap:8px; align-items:center; margin-top:3px; }
+  .mv { height:4px; background:var(--soft); border-radius:2px; margin-top:4px; overflow:hidden; } .mv i { display:block; height:100%; background:#0071e3; }
   .rel { border:1px solid var(--line); background:#fff; border-radius:8px; padding:3px 10px; font-size:12.5px; font-weight:600; }
   .kpis { display:flex; gap:12px; flex-wrap:wrap; } .kpi { flex:1 1 130px; background:#fff; border:1px solid var(--line); border-radius:16px; padding:12px 16px; } .kpi small { color:var(--muted); font-size:12px; } .kpi div { display:flex; align-items:baseline; gap:8px; } .kpi b { font:800 28px var(--head); letter-spacing:-0.04em; }
   #mapbox { position:relative; flex-grow:1; min-height:440px; border-radius:18px; overflow:hidden; border:1px solid var(--line); }
@@ -112,6 +116,18 @@
     <div id="abuse"></div>
     <div id="alerts" style="display:flex;flex-direction:column;gap:12px"></div>
     <div class="card" id="quarCard" hidden><div class="lbl" id="tSusp"></div><div class="small" id="suspNote" style="text-align:left;margin-bottom:8px"></div><div class="feed" id="quar"></div></div>
+    <details class="card" id="bcCard"><summary class="lbl" id="bcSummary" style="cursor:pointer;margin:0"></summary>
+      <div class="bcform">
+        <label for="bcType" id="bcLType"></label><select id="bcType"></select>
+        <label for="bcTarget" id="bcLTarget"></label><select id="bcTarget"></select>
+        <select id="bcDistrict" hidden></select>
+        <div id="bcPointRow" hidden><label for="bcPoint" id="bcLPoint"></label><select id="bcPoint"></select></div>
+        <div id="bcTextRow" hidden><textarea id="bcTextAz" maxlength="280" rows="2"></textarea><textarea id="bcTextEn" maxlength="280" rows="2"></textarea></div>
+        <div class="bcprev" id="bcPreview"></div>
+        <button id="bcSend" class="approve" style="height:44px;font-size:15px"></button>
+      </div>
+      <div class="lbl" id="bcHistTitle" style="margin-top:14px"></div><div id="bcHistory"></div>
+    </details>
     <div class="card"><div class="lbl" id="tFeed"></div><div class="feed" id="feed"></div></div>
   </section>
 
@@ -130,6 +146,7 @@
   <section class="col right">
     <div class="card"><div class="lbl" id="tPoints"></div><div id="points"></div></div>
     <div class="card"><div class="lbl" id="tBrigades"></div><div id="brigades"></div></div>
+    <div class="card"><div class="lbl" id="tJournal"></div><div class="feed" id="journal"></div></div>
     <details class="card" id="scPanel" hidden><summary class="lbl" id="scSummary" style="cursor:pointer;margin:0"></summary>
       <div id="scList" style="margin-top:10px"></div>
       <div class="lbl" id="tManual" style="margin-top:14px"></div>
@@ -137,6 +154,7 @@
         <select id="simPoint"></select><label class="percentage"><input id="simPct" type="number" min="0" max="100" value="96" style="width:64px">%</label><button id="simSet"></button>
       </div>
       <div class="sim" style="margin-top:8px"><button id="secMode" title=""></button></div>
+      <div class="sim" style="margin-top:8px"><span id="simSpeedL" class="small"></span><select id="simSpeed"><option value="1">x1</option><option value="5">x5</option><option value="10">x10</option><option value="30">x30</option></select></div>
       <div class="sim" style="margin-top:8px"><button id="chaosOn"></button><button id="chaosOff"></button><button id="roadRandom"></button><button id="reset"></button></div>
     </details>
   </section>
@@ -152,7 +170,9 @@ const $ = (id) => document.getElementById(id);
 const TONE = { FIRE: ['#fdeceb', '#b4231a'], COLLAPSE: ['#fff1de', '#8f4700'], FLOOD: ['#e6f2fd', '#0a5cc2'], MEDICAL: ['#eaf7ee', '#0b7a42'] };
 let token = localStorage.getItem('dtoken') || '';
 let snap = null; let snapAt = 0; let es = null; let roads = [];
-let map; const L2 = {}; let rules = {}; let scenarios = [];
+let map; const L2 = {}; let rules = {};
+let bcBuiltFor = ''; // language + data the broadcast form was built for
+let scenarios = [];
 let replay = null;
 let historyRequest = null;
 
@@ -186,6 +206,11 @@ function statics() {
   $('simSet').textContent = tr('d.sim.set'); $('chaosOn').textContent = tr('d.sim.apiDown'); $('chaosOff').textContent = tr('d.sim.apiUp');
   $('roadRandom').textContent = tr('d.sim.closeRoad'); $('reset').textContent = tr('d.sim.reset');
   document.querySelectorAll('[data-i18n-aria]').forEach((el) => el.setAttribute('aria-label', tr(el.dataset.i18nAria)));
+  $('bcSummary').textContent = tr('d.bc.title'); $('bcHistTitle').textContent = tr('d.bc.history'); $('bcSend').textContent = tr('d.bc.send');
+  $('bcLType').textContent = tr('d.bc.type'); $('bcLTarget').textContent = tr('d.bc.target'); $('bcLPoint').textContent = tr('d.bc.point');
+  $('bcTextAz').placeholder = tr('d.bc.textAz'); $('bcTextEn').placeholder = tr('d.bc.textEn');
+  $('tJournal').textContent = tr('d.journal'); $('simSpeedL').textContent = tr('d.sim.speed');
+  buildBcForm(); if (snap) { renderBcHistory(); renderJournal(); }
   renderSec(); renderScenarios(); renderTm();
   $('legend').innerHTML = [['#ff3b30', 'd.legendSos', '●'], ['#1a9e55', 'd.legendOpen', '●'], ['#ff9f0a', 'd.legendFilling', '●'], ['#e5352b', 'd.legendClosed', '┄'], ['#0071e3', 'd.legendBrigade', '■']]
     .map(([c, k, m]) => `<span><span style="color:${c}">${m}</span> ${esc(tr(k))}</span>`).join('');
@@ -200,7 +225,7 @@ async function connect() {
   es?.close();
   try { snap = await api('GET', '/api/dashboard', { token }); } catch (e) { showLogin(e.status === 401 || e.status === 403 ? e.message : ''); return; }
   $('login').classList.remove('on');
-  snapAt = Date.now(); roads = await api('GET', '/api/roads').catch(() => roads); rules = await api('GET', '/api/rules', { token }).catch(() => rules);
+  snapAt = Date.now(); roads = await api('GET', '/api/roads').catch(() => roads); rules = await api('GET', '/api/rules', { token }).catch(() => rules); if (rules.brigadeTimeScale) $('simSpeed').value = String(rules.brigadeTimeScale);
   scenarios = await api('GET', '/api/sim/scenarios', { token }).catch(() => []); // admin only; hidden otherwise
   renderScenarios(); render();
   es = new EventSource(`/api/stream?token=${encodeURIComponent(token)}`);
@@ -218,7 +243,8 @@ function render() {
   checkReplayAlerts();
   const apiDown = snap.chaos.externalDown;
   $('apiPill').className = `pill ${apiDown ? 'bad' : 'ok'}`; $('apiPill').textContent = apiDown ? tr('d.apiDown') : tr('d.apiOk');
-  renderAbuse(); renderAlerts(); renderFeed(); renderQuarantine(); renderKpis(); renderSide(); drawMap();
+  renderAbuse(); renderAlerts(); renderFeed(); renderQuarantine(); renderKpis(); renderSide(); renderBcHistory(); renderJournal(); drawMap();
+  if (bcBuiltFor !== state.lang + snap.points.length + snap.zones.length) buildBcForm();
   if (replay) showFrame(replay.i);
 }
 
@@ -290,9 +316,9 @@ function drawFrame(f) {
     L.circleMarker([p.lat, p.lng], { radius: active ? 10 + Math.min(100, pct) / 25 : 6, color: '#fff', weight: 3, fillColor: active ? pctColor(pct) : '#9ca3af', fillOpacity: 1 }).bindTooltip(`${name(p.name)} ${pct}%`).addTo(L2.points);
   }
   for (const [la, ln, type] of f.sos) L.circleMarker([la, ln], { radius: 6, color: '#fff', weight: 2, fillColor: '#ff3b30', fillOpacity: 1 }).bindTooltip(tr('sos.' + type)).addTo(L2.sos);
-  for (const [id, st] of f.brigades) {
+  for (const [id, st, fla, fln] of f.brigades) {
     const b = snap.brigades.find((x) => x.id === id); if (!b) continue;
-    L.marker([b.lat, b.lng], { icon: L.divIcon({ className: '', iconSize: [22, 22], html: `<div style="width:22px;height:22px;border-radius:6px;background:#0071e3;border:3px solid #fff;opacity:${st === 'available' ? 1 : .55}"></div>` }) }).bindTooltip(`${b.name} · ${tr('brigade.' + st)}`).addTo(L2.brigades);
+    L.marker([Number.isFinite(fla) ? fla : b.lat, Number.isFinite(fln) ? fln : b.lng], { icon: L.divIcon({ className: '', iconSize: [22, 22], html: `<div style="width:22px;height:22px;border-radius:6px;background:#0071e3;border:3px solid #fff;opacity:${st === 'available' ? 1 : .55}"></div>` }) }).bindTooltip(`${b.name} · ${tr('brigade.' + st)}`).addTo(L2.brigades);
   }
 }
 function frameAt(frames, position) {
@@ -401,7 +427,7 @@ setInterval(() => { if (snap?.alerts.some((a) => a.status === 'approved' && a.un
 
 function renderFeed() {
   const items = [...snap.sos].reverse().slice(0, 6);
-  $('feed').innerHTML = items.length ? items.map((s) => `<div><i style="background:#ff3b30"></i><span>${esc(tr('sos.' + s.type))} · ${esc(zoneName(s.districtId))}${s.note ? ' · ' + esc(s.note) : ''}${s.priority === 1 ? ` <span class="need">♿ ${esc(tr('d.priority'))}</span>` : ''}${s.verified ? '' : ` <span class="flagtag">${esc(tr('d.flag.unverified'))}</span>`}</span><small>${new Date(s.createdAt).toLocaleTimeString(state.lang, { hour: '2-digit', minute: '2-digit' })}</small></div>`).join('')
+  $('feed').innerHTML = items.length ? items.map((s) => `<div><i style="background:#ff3b30"></i><span>${esc(tr('sos.' + s.type))} · ${esc(zoneName(s.districtId))}${s.note ? ' · ' + esc(s.note) : ''}${s.priority === 1 ? ` <span class="need">♿ ${esc(tr('d.priority'))}</span>` : ''}${s.source === 'sms' ? ` <span class="need">${esc(tr('d.flag.sms'))}</span>` : ''}${s.verified ? '' : ` <span class="flagtag">${esc(tr('d.flag.unverified'))}</span>`}</span><small>${new Date(s.createdAt).toLocaleTimeString(state.lang, { hour: '2-digit', minute: '2-digit' })}</small></div>`).join('')
     : `<div class="small">${esc(tr('d.noSignals'))}</div>`;
 }
 
@@ -415,11 +441,84 @@ function renderKpis() {
 function renderSide() {
   $('points').innerHTML = snap.points.filter((p) => p.active).sort((a, b) => b.occupancyPct - a.occupancyPct).map((p) =>
     `<div class="prow"><div><span>${esc(name(p.name))}</span><b style="color:${pctColor(p.occupancyPct)}">${p.occupancyPct}%</b></div><div class="bar"><i style="width:${Math.min(100, p.occupancyPct)}%;background:${pctColor(p.occupancyPct)}"></i></div></div>`).join('');
-  const bs = { available: ['#e6f6ec', '#0b7a42'], dispatched: ['#e6f2fd', '#0a5cc2'], on_scene: ['#e6f2fd', '#0a5cc2'], offline: ['#f4f5f7', '#5f6470'] };
-  $('brigades').innerHTML = snap.brigades.map((b) => `<div class="brow"><span>${esc(b.name)}${b.kind === 'accessible_transport' ? ` <span class="accfeat">♿ ${esc(tr('d.accessibleTag'))}</span>` : ''}</span><span style="display:flex;gap:6px;align-items:center"><span class="state" style="background:${bs[b.status][0]};color:${bs[b.status][1]}">${esc(tr('brigade.' + b.status))}</span>${b.status !== 'available' ? `<button data-free="${b.id}" title="${esc(tr('d.freeUp'))}" style="border:1px solid var(--line);background:#fff;border-radius:8px;padding:2px 8px">✓</button>` : ''}</span></div>`).join('');
+  const bs = { available: ['#e6f6ec', '#0b7a42'], dispatched: ['#e6f2fd', '#0a5cc2'], on_scene: ['#e6f2fd', '#0a5cc2'], returning: ['#fff4de', '#8a5a00'], offline: ['#f4f5f7', '#5f6470'] };
+  const left = (b) => (b.etaSec == null ? null : Math.max(0, b.etaSec - Math.floor((Date.now() - snapAt) / 1000)));
+  const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  $('brigades').innerHTML = snap.brigades.map((b) => {
+    const eta = left(b);
+    return `<div class="brow" style="flex-wrap:wrap"><span>${esc(b.name)}${b.kind === 'accessible_transport' ? ` <span class="accfeat">♿ ${esc(tr('d.accessibleTag'))}</span>` : ''}</span><span style="display:flex;gap:6px;align-items:center">${eta != null ? `<small style="color:var(--muted)">${mmss(eta)}</small>` : ''}<span class="state" style="background:${bs[b.status][0]};color:${bs[b.status][1]}">${esc(tr('brigade.' + b.status))}</span>${b.status !== 'available' ? `<button data-free="${b.id}" title="${esc(tr('d.freeUp'))}" style="border:1px solid var(--line);background:#fff;border-radius:8px;padding:2px 8px">✓</button>` : ''}</span>${b.progress != null ? `<div class="mv" style="flex-basis:100%"><i style="width:${Math.round(b.progress * 100)}%"></i></div>` : ''}</div>`;
+  }).join('');
   $('brigades').querySelectorAll('[data-free]').forEach((b) => b.addEventListener('click', () => act(() => api('POST', `/api/brigades/${b.dataset.free}/status`, { token, body: { status: 'available' } }))));
   const sel = $('simPoint'); if (!sel.options.length) sel.innerHTML = snap.points.filter((p) => p.active).map((p) => `<option value="${p.id}">${esc(name(p.name))}</option>`).join('');
 }
+
+// ---------------------------------------------------------------- mass notification (dispatcher -> citizens)
+const BC_TYPES = ['evacuate', 'shelter', 'avoid_area', 'all_clear', 'custom'];
+const topAlert = () => snap?.alerts.find((a) => a.status === 'open');
+function bcTargetObj() {
+  const t = $('bcTarget').value;
+  if (t === 'district') return { kind: 'districts', districts: [$('bcDistrict').value] };
+  if (t === 'radius') { const a = topAlert(); return a ? { kind: 'radius', lat: a.center.lat, lng: a.center.lng, radiusM: 1000 } : { kind: 'all' }; }
+  return { kind: 'all' };
+}
+function buildBcForm() {
+  if (!snap) return;
+  const keep = { type: $('bcType').value, target: $('bcTarget').value, district: $('bcDistrict').value, point: $('bcPoint').value };
+  $('bcType').innerHTML = BC_TYPES.map((t) => `<option value="${t}">${esc(tr('bc.type.' + t))}</option>`).join('');
+  $('bcTarget').innerHTML = [['all', 'd.bc.target.all'], ['district', 'd.bc.target.district'], ['radius', 'd.bc.target.radius']].map(([v, k]) => `<option value="${v}">${esc(tr(k))}</option>`).join('');
+  $('bcDistrict').innerHTML = snap.zones.map((z) => `<option value="${z.id}">${esc(name(z.name))}</option>`).join('');
+  $('bcPoint').innerHTML = snap.points.filter((p) => p.active).map((p) => `<option value="${p.id}">${esc(name(p.name))}</option>`).join('');
+  for (const [id, v] of [['bcType', keep.type], ['bcTarget', keep.target], ['bcDistrict', keep.district], ['bcPoint', keep.point]]) if (v) $(id).value = v;
+  bcBuiltFor = state.lang + snap.points.length + snap.zones.length;
+  bcSync();
+}
+function bcSync() {
+  const type = $('bcType').value;
+  $('bcDistrict').hidden = $('bcTarget').value !== 'district';
+  $('bcPointRow').hidden = type !== 'evacuate';
+  $('bcTextRow').hidden = type !== 'custom';
+  let prev = '';
+  if (type === 'custom') prev = $('bcTextAz').value || $('bcTextEn').value;
+  else {
+    const p = snap?.points.find((x) => x.id === $('bcPoint').value);
+    prev = `${tr('bc.' + type + '.title').replace('{point}', p ? name(p.name) : '…')}. ${tr('bc.' + type + '.body')}`;
+  }
+  $('bcPreview').textContent = prev ? `${tr('d.bc.preview')}: ${prev}` : '';
+}
+for (const id of ['bcType', 'bcTarget', 'bcDistrict', 'bcPoint', 'bcTextAz', 'bcTextEn']) $(id).addEventListener('input', bcSync);
+$('bcSend').addEventListener('click', () => act(async () => {
+  const type = $('bcType').value;
+  const body = { type, target: bcTargetObj() };
+  if (type === 'evacuate') body.pointId = $('bcPoint').value;
+  if (type === 'custom') { body.severity = 'warning'; body.text = { az: $('bcTextAz').value, en: $('bcTextEn').value }; }
+  if (!window.confirm(`${tr('d.bc.confirm')}\n\n${$('bcPreview').textContent}`)) return;
+  await api('POST', '/api/broadcasts', { token, body });
+  toast(tr('d.bc.sent'));
+  if (type === 'custom') { $('bcTextAz').value = ''; $('bcTextEn').value = ''; bcSync(); }
+}));
+function bcTargetLabel(t) {
+  if (t.kind === 'all') return tr('d.bc.target.all');
+  if (t.kind === 'districts') return t.districts.map((id) => name(snap.zones.find((z) => z.id === id)?.name) ?? id).join(', ');
+  return `${t.radiusM / 1000} km`;
+}
+function renderBcHistory() {
+  const list = snap.broadcasts ?? [];
+  $('bcHistory').innerHTML = list.length ? list.map((b) => `<div class="bch"><b>${esc(tr('bc.type.' + b.type))} · ${esc(bcTargetLabel(b.target))}</b>
+    <div class="meta"><span>${b.reach} ${esc(tr('d.bc.reach'))} · ${b.acks} ${esc(tr('d.bc.acks'))} · ${esc(tr('d.bc.' + (b.status === 'active' ? 'active' : b.status)))}</span>${b.status === 'active' ? `<button class="rel" data-bc-cancel="${b.id}">${esc(tr('d.bc.cancel'))}</button>` : ''}</div></div>`).join('')
+    : `<div class="small">${esc(tr('d.bc.none'))}</div>`;
+  $('bcHistory').querySelectorAll('[data-bc-cancel]').forEach((b) => b.addEventListener('click', () => act(async () => { b.disabled = true; await api('POST', `/api/broadcasts/${b.dataset.bcCancel}/cancel`, { token }); })));
+}
+
+// ---------------------------------------------------------------- decision journal
+function renderJournal() {
+  const items = snap.decisions ?? [];
+  const extra = (d) => d.details?.brigadeId ? ` · ${d.details.brigadeId}` : d.details?.name ? ` · ${d.details.name}` : d.details?.status ? ` · ${tr('brigade.' + d.details.status)}` : d.details?.type && d.action.startsWith('broadcast') ? ` · ${tr('bc.type.' + d.details.type)}` : d.details?.type && d.action === 'alert.created' ? ` · ${d.details.type === 'PRIORITY_SOS' ? tr('d.priority') : d.details.type === 'SOS_CLUSTER' ? tr('alert.SOS_CLUSTER') : tr('alert.POINT_OVERCROWD')}` : '';
+  $('journal').innerHTML = items.length ? items.slice(0, 10).map((d) => `<div><i style="background:${d.actor === 'system' ? '#94a3b8' : '#0071e3'}"></i><span><b>${esc(tr('audit.' + d.action))}</b>${esc(extra(d))}<br><small>${esc(tr('role.' + d.actor))}</small></span><small>${new Date(d.t).toLocaleTimeString(state.lang, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</small></div>`).join('')
+    : `<div class="small">${esc(tr('d.noDecisions'))}</div>`;
+}
+
+// brigades move: refresh countdowns/progress once a second while any of them is on the road
+setInterval(() => { if (snap && snap.brigades.some((b) => b.etaSec != null) && !replay) renderSide(); }, 1000);
 
 // ---------------------------------------------------------------- map
 function ensureMap() {
@@ -456,6 +555,7 @@ $('chaosOn').addEventListener('click', sim(() => api('POST', '/api/sim/chaos', {
 $('chaosOff').addEventListener('click', sim(() => api('POST', '/api/sim/chaos', { token, body: { externalDown: false } })));
 $('roadRandom').addEventListener('click', sim(async () => { const open = roads.filter((r) => !r.closed); const r = open[Math.floor(Math.random() * open.length)]; await api('POST', `/api/roads/${r.id}/close`, { token }); }));
 $('reset').addEventListener('click', sim(() => api('POST', '/api/sim/reset', { token })));
+$('simSpeed').addEventListener('change', sim(async () => { rules = await api('POST', '/api/sim/rules', { token, body: { brigadeTimeScale: Number($('simSpeed').value) } }); }));
 
 if (token) connect(); else showLogin();
 </script>

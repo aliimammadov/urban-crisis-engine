@@ -5,7 +5,7 @@ import { runScenario, SCENARIO_NAMES } from '../src/scenarios.js';
 
 function setup() {
   const app = createApp({ tickMs: 0 });
-  const run = (name) => runScenario(name, { store: app.store, graph: app.graph, resetAll: () => { for (const e of app.graph.edges.values()) { e.closed = false; } app.store.reset(); } });
+  const run = (name) => runScenario(name, { store: app.store, graph: app.graph, resetAll: () => { for (const e of app.graph.edges.values()) { e.closed = false; } app.store.reset(); }, sms: app.sms, broadcasts: app.broadcasts });
   return { ...app, run };
 }
 const open = (app, type) => app.store.alerts.filter((a) => a.type === type && a.status === 'open');

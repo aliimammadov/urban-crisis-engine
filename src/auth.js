@@ -3,7 +3,7 @@ import { timingSafeEqual } from 'node:crypto';
 // Role -> permissions. Adding a role (Challenge Drop: "new role") = one line here + one token.
 export const ROLE_PERMISSIONS = {
   citizen: [],
-  dispatcher: ['dashboard', 'alert:approve', 'road:write', 'brigade:write'],
+  dispatcher: ['dashboard', 'alert:approve', 'road:write', 'brigade:write', 'broadcast:send'],
   observer: ['dashboard'], // read-only example role
   admin: ['*'],
 };

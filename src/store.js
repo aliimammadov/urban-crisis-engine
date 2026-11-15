@@ -21,7 +21,8 @@ export class Store extends EventEmitter {
     const s = this.seed;
     this.districts = s.districts.map((d) => ({ ...d }));
     this.points = new Map(s.points.map((p) => [p.id, { ...p }]));
-    this.brigades = new Map(s.brigades.map((b) => [b.id, { ...b }]));
+    // `lat/lng` of a brigade is its HOME base; while it moves, the position is derived from `move` (see brigadePos)
+    this.brigades = new Map(s.brigades.map((b) => [b.id, { ...b, home: { lat: b.lat, lng: b.lng } }]));
     this.sos = [];
     this.safe = new Map();
     this.profiles = new Map(); // deviceId -> {role, needs, updatedAt}  (priority-SOS role)
@@ -79,6 +80,7 @@ export class Store extends EventEmitter {
       createdAt: this.now(),
       status: 'open',
       // abuse-guard inputs (never exposed to dashboards: see publicSos)
+      source: meta.source ?? 'app', // 'app' | 'sms'
       deviceId: meta.deviceId ?? citizenId.trim(),
       ip: meta.ip ?? 'local',
       verified: !!meta.verified,
@@ -129,10 +131,18 @@ export class Store extends EventEmitter {
   sosStatus(id) {
     const s = this.findSos(id);
     const dispatched = this.alerts.find((a) => a.status === 'approved' && a.sosIds?.includes(id));
-    const stage = s.status === 'cancelled' ? 0 : dispatched ? 3 : 2;
+    // stage 0 cancelled, 2 assigning, 3 help on the way (live ETA), 4 help has arrived
+    let stage = s.status === 'cancelled' ? 0 : dispatched ? 3 : 2;
+    let etaSec = null;
+    const b = dispatched ? this.brigades.get(dispatched.result?.brigadeId) : null;
+    if (b && b.alertId === dispatched.id) {
+      if (b.status === 'dispatched') etaSec = this.brigadeView(b).etaSec;
+      else if (b.status === 'on_scene' || b.status === 'returning') stage = 4;
+    } else if (b && !b.alertId && dispatched) stage = 4; // mission finished, brigade is back at base
     return {
       id: s.id, type: s.type, status: s.status, createdAt: s.createdAt, stage, priority: s.priority, needs: s.needs,
-      etaMin: dispatched?.result?.etaMin ?? null,
+      etaSec,
+      etaMin: etaSec != null ? Math.max(1, Math.ceil(etaSec / 60)) : dispatched?.result?.etaMin ?? null,
       cancelMsLeft: s.status === 'open' ? Math.max(0, s.createdAt + this.cancelWindowMs - this.now()) : 0,
     };
   }
@@ -209,16 +219,47 @@ export class Store extends EventEmitter {
     return this.pointView(p);
   }
 
+  /** Current position: interpolated while moving, at the scene when on_scene, else at home. */
+  brigadePos(b) {
+    if (b.move) {
+      const p = Math.min(1, Math.max(0, (this.now() - b.move.startedAt) / b.move.durationMs));
+      return { lat: b.move.from.lat + (b.move.to.lat - b.move.from.lat) * p, lng: b.move.from.lng + (b.move.to.lng - b.move.from.lng) * p };
+    }
+    if (b.status === 'on_scene' && b.target) return { ...b.target };
+    return { ...b.home };
+  }
+
+  brigadeView(b) {
+    let etaSec = null; let progress = null;
+    if (b.move) {
+      const left = b.move.startedAt + b.move.durationMs - this.now();
+      etaSec = Math.max(0, Math.ceil(left / 1000));
+      progress = Math.min(1, Math.max(0, 1 - left / b.move.durationMs));
+    }
+    const { lat, lng } = this.brigadePos(b);
+    return { id: b.id, kind: b.kind, name: b.name, status: b.status, lat, lng, home: b.home, target: b.target ?? null, alertId: b.alertId ?? null, etaSec, progress };
+  }
+
+  /** Back to base, free for new tasks. */
+  resetBrigade(b) {
+    b.status = 'available';
+    delete b.target; delete b.alertId; delete b.move; delete b.onSceneAt;
+  }
+
   setBrigadeStatus(id, status) {
     const b = this.brigades.get(id);
     if (!b) throw new AppError(404, 'BRIGADE_NOT_FOUND');
-    if (!['available', 'dispatched', 'on_scene', 'offline'].includes(status)) {
+    if (!['available', 'dispatched', 'on_scene', 'returning', 'offline'].includes(status)) {
       throw new AppError(400, 'INVALID_STATUS');
     }
-    b.status = status;
-    if (status === 'available') { delete b.target; delete b.alertId; }
+    if (status === 'available') this.resetBrigade(b);
+    else {
+      b.status = status;
+      if (status !== 'dispatched' && status !== 'returning') delete b.move;
+      if (status === 'on_scene') b.onSceneAt = this.now();
+    }
     this.emit('change', 'brigade');
-    return { ...b };
+    return this.brigadeView(b);
   }
 
   /** Open SOS inside the window that may count for escalation (quarantined ones never do). */
@@ -244,7 +285,7 @@ export class Store extends EventEmitter {
   publicSos(s) {
     return {
       id: s.id, type: s.type, lat: s.lat, lng: s.lng, note: s.note, districtId: s.districtId, createdAt: s.createdAt,
-      status: s.status, verified: s.verified, trust: s.trust ?? null, flags: s.flags, quarantined: s.quarantined,
+      status: s.status, verified: s.verified, source: s.source, trust: s.trust ?? null, flags: s.flags, quarantined: s.quarantined,
       priority: s.priority, needs: s.needs,
     };
   }
@@ -257,7 +298,7 @@ export class Store extends EventEmitter {
     return {
       time: this.now(),
       points: this.listPoints(),
-      brigades: [...this.brigades.values()].map((b) => ({ ...b })),
+      brigades: [...this.brigades.values()].map((b) => this.brigadeView(b)),
       sos: openSos.slice(-300).map((s) => this.publicSos(s)),
       sosTotalOpen: openSos.length,
       priorityOpen: openSos.filter((s) => s.priority === 1).length,
