@@ -682,7 +682,9 @@ for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) safeBtn.addEven
 safeBtn.addEventListener('click', (e) => { if (e.detail === 0) openSafe(); else toast(`${tr('ui.imSafe')}: ${tr('m.holdHint')}`); }); // keyboard activation opens directly
 
 const track = $('track'); const thumb = $('thumb'); const fill = $('fill');
-function openSafe() { $('safeOverlay').classList.add('on'); setThumb(0); $('safeCancel').focus(); }
+function openSafe() {
+  if (!current) { buzz(30); toast(tr('m.noSos')); return; } // nothing to confirm: there is no active SOS
+  $('safeOverlay').classList.add('on'); setThumb(0); $('safeCancel').focus(); }
 function closeSafe() { $('safeOverlay').classList.remove('on'); setThumb(0); }
 $('safeCancel').addEventListener('click', closeSafe);
 $('safeOverlay').addEventListener('click', (e) => { if (e.target === $('safeOverlay')) closeSafe(); });
