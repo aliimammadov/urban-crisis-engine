@@ -1,5 +1,6 @@
 // Staff authentication (JWT) + role-based access control (RBAC).
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { generateKeys } from './keystore.js';
 import { signJwt, verifyJwt } from './jwt.js';
 
 // Role -> permissions. A new staff role = one line here (+ a user).
@@ -40,11 +41,11 @@ const hash = (password, salt) => scryptSync(String(password), salt, 32, { N: 1 <
 
 export class Auth {
   constructor({
-    users = defaultUsers(), permissions = ROLE_PERMISSIONS, secret = process.env.JWT_SECRET || randomBytes(32).toString('hex'),
+    users = defaultUsers(), permissions = ROLE_PERMISSIONS, keys = generateKeys(),
     ttlSec = (Number(process.env.JWT_TTL_MIN) || 60) * 60, now = () => Date.now(), staticTokens = null,
   } = {}) {
     this.permissions = permissions;
-    this.secret = secret;
+    this.keys = keys; // {privateKey, publicKey}: tokens are signed with the private key and checked with the public one
     this.ttlSec = ttlSec;
     this.now = now;
     this.salt = randomBytes(16);
@@ -66,7 +67,7 @@ export class Auth {
   }
 
   issue(sub, role) {
-    const token = signJwt({ sub, role }, this.secret, { ttlSec: this.ttlSec, now: this.now() });
+    const token = signJwt({ sub, role }, this.keys.privateKey, { ttlSec: this.ttlSec, now: this.now() });
     return { token, tokenType: 'Bearer', expiresInSec: this.ttlSec, user: sub, role, permissions: this.permissions[role] ?? [] };
   }
 
@@ -75,7 +76,7 @@ export class Auth {
     const header = req.headers.authorization ?? '';
     const bearer = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
     if (bearer.split('.').length === 3) {
-      const c = verifyJwt(bearer, this.secret, { now: this.now() });
+      const c = verifyJwt(bearer, this.keys.publicKey, { now: this.now() });
       if (!c || typeof c.sub !== 'string' || !(c.role in this.permissions) || this.revoked.has(c.jti)) return null;
       const u = this.users.get(c.sub);
       if (!u || u.role !== c.role) return null; // account removed or role changed since the token was issued

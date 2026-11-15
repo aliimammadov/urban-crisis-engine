@@ -15,7 +15,7 @@ npm run demo         # fires a SOS cluster + overcrowding + API outage (server m
 npm run load         # load test (start server with SOS_BURST=100000 API_BURST=100000 to disable limits)
 ```
 
-Staff sign-in (JWT, demo accounts): `admin / admin-demo`, `dispatcher / dispatcher-demo`, `observer / observer-demo`. Override with `ADMIN_PASSWORD`, `DISPATCHER_PASSWORD`, `OBSERVER_PASSWORD`; set `JWT_SECRET` (and optionally `JWT_TTL_MIN`) in production. Opaque static tokens are off unless `ALLOW_STATIC_TOKENS=1` (tests only).
+Staff sign-in (JWT, demo accounts): `admin / admin-demo`, `dispatcher / dispatcher-demo`, `observer / observer-demo`. Override with `ADMIN_PASSWORD`, `DISPATCHER_PASSWORD`, `OBSERVER_PASSWORD` (optionally `JWT_TTL_MIN`). Tokens are Ed25519-signed JWTs; the key pair is generated on first start and kept in `.data/keys.json` (git-ignored, mode 0600), so logins survive restarts and no secret has to be configured. Opaque static tokens are off unless `ALLOW_STATIC_TOKENS=1` (tests only).
 
 ## Critical Crisis Algorithm (`src/crisis.js`)
 * **Rule A** – ≥ 4 *distinct* citizens send SOS within 5 min, inside one district **or** within 500 m → RED alert.
@@ -84,6 +84,6 @@ Add `?lang=az|en|ru` for localized error messages.
 * **Rate limiting** (`src/shield.js`, `src/ratelimit.js`): signed device = own bucket (a crowd behind one Wi-Fi is not punished together); unsigned = bucket per IP + one global bucket (a botnet of many IPs still has a fixed budget). The limit runs before the body is read; refused requests get `429`.
 * **Duplicate filter** (`store.js`): same signed device (or claimed id) + same type within 60 s = the original SOS with a `repeats` counter, not a new signal.
 * **Flood mode**: more than 150 attempts in 10 s turns protection on. Unsigned SOS are still accepted (never silently dropped) but quarantined, so fakes cannot raise alerts. The dispatcher sees a red banner with live counters; signed devices are unaffected.
-* **JWT + RBAC** (`src/jwt.js`, `src/auth.js`): HS256 only (`alg: none` rejected), constant-time check, mandatory `exp`, logout revokes the token at once, scrypt password check with equal cost for unknown users, login brute-force limits. Roles: `admin` (everything), `dispatcher` (approve, dispatch, roads, brigades, broadcast), `observer` (read-only). Denied attempts go to the decision log (`auth.denied`).
+* **JWT + RBAC** (`src/jwt.js`, `src/auth.js`): EdDSA (Ed25519) only (`alg: none` and HS256 rejected), mandatory `exp`, logout revokes the token at once, scrypt password check with equal cost for unknown users, login brute-force limits. Roles: `admin` (everything), `dispatcher` (approve, dispatch, roads, brigades, broadcast), `observer` (read-only). Denied attempts go to the decision log (`auth.denied`).
 * **Latency**: tested in `test/security.test.js` (600 SOS plus dashboard reads at the same time, average < 300 ms); `npm run load` prints the average (locally about 5 ms at 16 000 req/s).
 * Demo: dispatcher panel as admin → Scenarios → "SOS flood (600 requests)".

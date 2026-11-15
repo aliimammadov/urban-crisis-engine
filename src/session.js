@@ -4,7 +4,7 @@ const ID_RE = /^[A-Za-z0-9-]{8,64}$/;
 
 /** Server-issued, HMAC-signed device identity. A token proves the id was minted by us (and rate-limited at issuance). */
 export class Sessions {
-  constructor(secret = process.env.TOKEN_SECRET || randomBytes(24).toString('hex')) {
+  constructor(secret = randomBytes(24).toString('hex')) {
     this.secret = secret;
   }
 

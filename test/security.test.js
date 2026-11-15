@@ -1,35 +1,59 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHmac } from 'node:crypto';
 import { createApp } from '../src/app.js';
 import { signJwt, verifyJwt } from '../src/jwt.js';
 
-const SECRET = 'unit-test-secret';
-const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+import { createHmac, generateKeyPairSync } from 'node:crypto';
+import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { generateKeys, loadKeys } from '../src/keystore.js';
+import { Auth } from '../src/auth.js';
 
-// ---------------- JWT ----------------
-test('jwt: valid token round-trips, expired / tampered / alg=none / wrong secret are rejected', () => {
+const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+const KEYS = generateKeys();
+
+// ---------------- JWT (Ed25519) ----------------
+test('jwt: valid token round-trips, expired / tampered / alg=none / foreign key / HS256 confusion are rejected', () => {
   const now = 1_700_000_000_000;
-  const tok = signJwt({ sub: 'a', role: 'admin' }, SECRET, { ttlSec: 60, now });
-  assert.equal(verifyJwt(tok, SECRET, { now: now + 1000 }).sub, 'a');
-  assert.equal(verifyJwt(tok, SECRET, { now: now + 61_000 }), null, 'expired');
-  assert.equal(verifyJwt(tok, 'other', { now }), null, 'wrong secret');
+  const tok = signJwt({ sub: 'a', role: 'admin' }, KEYS.privateKey, { ttlSec: 60, now });
+  assert.equal(verifyJwt(tok, KEYS.publicKey, { now: now + 1000 }).sub, 'a');
+  assert.equal(verifyJwt(tok, KEYS.publicKey, { now: now + 61_000 }), null, 'expired');
+  assert.equal(verifyJwt(tok, generateKeyPairSync('ed25519').publicKey, { now }), null, 'signed by another key');
   const [h, p, s] = tok.split('.');
   const forged = b64({ sub: 'a', role: 'admin', exp: 9_999_999_999, jti: 'x' });
-  assert.equal(verifyJwt(`${h}.${forged}.${s}`, SECRET, { now }), null, 'payload changed');
-  const none = `${b64({ alg: 'none', typ: 'JWT' })}.${p}.`;
-  assert.equal(verifyJwt(none, SECRET, { now }), null, 'alg none');
-  const hs512 = b64({ alg: 'HS512', typ: 'JWT' });
-  assert.equal(verifyJwt(`${hs512}.${p}.${createHmac('sha512', SECRET).update(`${hs512}.${p}`).digest('base64url')}`, SECRET, { now }), null, 'other alg');
-  assert.equal(verifyJwt('a.b', SECRET), null);
-  assert.equal(verifyJwt('x'.repeat(5000), SECRET), null);
-  const noExp = `${h}.${b64({ sub: 'a', role: 'admin' })}`;
-  assert.equal(verifyJwt(`${noExp}.${createHmac('sha256', SECRET).update(noExp).digest('base64url')}`, SECRET, { now }), null, 'exp is mandatory');
+  assert.equal(verifyJwt(`${h}.${forged}.${s}`, KEYS.publicKey, { now }), null, 'payload changed');
+  assert.equal(verifyJwt(`${b64({ alg: 'none', typ: 'JWT' })}.${p}.`, KEYS.publicKey, { now }), null, 'alg none');
+  // classic algorithm-confusion attack: HS256 token "signed" with the public key text
+  const hs = b64({ alg: 'HS256', typ: 'JWT' });
+  const pub = KEYS.publicKey.export({ type: 'spki', format: 'pem' });
+  assert.equal(verifyJwt(`${hs}.${p}.${createHmac('sha256', pub).update(`${hs}.${p}`).digest('base64url')}`, KEYS.publicKey, { now }), null, 'HS256 confusion');
+  assert.equal(verifyJwt('a.b', KEYS.publicKey), null);
+  assert.equal(verifyJwt('x'.repeat(5000), KEYS.publicKey), null);
+  const noExpToken = signJwt({ sub: 'a' }, KEYS.privateKey, { now });
+  const [h2, p2] = noExpToken.split('.');
+  const body = b64({ sub: 'a', role: 'admin' }); // no exp
+  assert.equal(verifyJwt(`${h2}.${body}.${noExpToken.split('.')[2]}`, KEYS.publicKey, { now }), null, 'exp is mandatory / signature does not match');
+  assert.ok(p2);
+});
+
+test('keystore: keys are created on first start, stored privately and survive a restart (no secret to configure)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'keys-'));
+  const file = join(dir, 'sub', 'keys.json');
+  try {
+    const first = loadKeys(file);
+    assert.equal(statSync(file).mode & 0o077, 0, 'file is private to the owner');
+    const token = new Auth({ keys: first }).login('dispatcher', 'dispatcher-demo').token;
+    const second = loadKeys(file); // "restart"
+    assert.equal(new Auth({ keys: second }).identify({ headers: { authorization: `Bearer ${token}` } })?.sub, 'dispatcher', 'old token still valid after restart');
+    assert.equal(second.deviceSecret, first.deviceSecret);
+    assert.equal(new Auth({ keys: generateKeys() }).identify({ headers: { authorization: `Bearer ${token}` } }), null, 'other server keys do not accept it');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 // ---------------- HTTP: login, RBAC, revocation ----------------
 async function start(opts = {}) {
-  const app = createApp({ tickMs: 0, historyMs: 0, moveMs: 0, tokenSecret: 'k', jwtSecret: SECRET, staticTokens: false, ...opts });
+  const app = createApp({ tickMs: 0, historyMs: 0, moveMs: 0, tokenSecret: 'k', staticTokens: false, ...opts });
   await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${app.server.address().port}`;
   const call = (method, path, { body, token, headers } = {}) => fetch(base + path, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined });

@@ -8,8 +8,6 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin-demo}
       DISPATCHER_PASSWORD: ${DISPATCHER_PASSWORD:-dispatcher-demo}
       OBSERVER_PASSWORD: ${OBSERVER_PASSWORD:-observer-demo}
-      JWT_SECRET: ${JWT_SECRET:-}
-      TOKEN_SECRET: ${TOKEN_SECRET:-}
       # set to 1 only when a trusted reverse proxy sets X-Forwarded-For
       TRUST_PROXY: ${TRUST_PROXY:-0}
     restart: unless-stopped

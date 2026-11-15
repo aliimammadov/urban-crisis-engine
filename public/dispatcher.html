@@ -211,7 +211,8 @@ import { api, esc, loadLang, name, pctColor, state, tr } from './common.js';
 
 const $ = (id) => document.getElementById(id);
 const TONE = { FIRE: ['#fdeceb', '#b4231a'], COLLAPSE: ['#fff1de', '#8f4700'], FLOOD: ['#e6f2fd', '#0a5cc2'], MEDICAL: ['#eaf7ee', '#0b7a42'] };
-let token = sessionStorage.getItem('jwt') || ''; let me = null; let refreshTimer = null;
+const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* blocked */ } }, del: (k) => { try { localStorage.removeItem(k); } catch { /* blocked */ } } };
+let token = store.get('jwt') || ''; let me = null; let refreshTimer = null;
 let snap = null; let snapAt = 0; let es = null; let roads = [];
 let map; const L2 = {}; let rules = {};
 const picks = {}; // alertId -> brigade the dispatcher chose (survives the 1 s live re-renders)
@@ -288,9 +289,9 @@ initTabs('tabsL', 'dtabL', 'alerts');
 
 // ---------------------------------------------------------------- login + stream
 function showLogin(msg = '') { $('login').classList.add('on'); $('loginErr').textContent = msg; $('user').value ||= 'dispatcher'; $('token').value = ''; ($('user').value ? $('token') : $('user')).focus(); }
-function signOut(msg = '') { es?.close(); es = null; clearTimeout(refreshTimer); token = ''; me = null; sessionStorage.removeItem('jwt'); $('who').style.display = $('logout').style.display = 'none'; showLogin(msg); }
+function signOut(msg = '') { es?.close(); es = null; clearTimeout(refreshTimer); token = ''; me = null; store.del('jwt'); $('who').style.display = $('logout').style.display = 'none'; showLogin(msg); }
 function startSession(sess) {
-  token = sess.token; me = sess; sessionStorage.setItem('jwt', token);
+  token = sess.token; me = sess; store.set('jwt', token);
   $('who').textContent = `${sess.user} · ${sess.role}`; $('who').style.display = $('logout').style.display = '';
   clearTimeout(refreshTimer); refreshTimer = setTimeout(async () => { try { startSession(await api('POST', '/api/auth/refresh', { token })); } catch { signOut(tr('d.sessionExpired')); } }, Math.max(30, sess.expiresInSec - 120) * 1000);
 }

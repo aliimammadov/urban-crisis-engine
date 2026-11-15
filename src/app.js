@@ -45,7 +45,7 @@ export function createApp({
   auth: authOpt,
   // legacy opaque bearer tokens: OFF by default (staff must log in and use a JWT); tests/scripts may enable them
   staticTokens = process.env.ALLOW_STATIC_TOKENS === '1',
-  jwtSecret,
+  keys,
   rules = {},
   limits = {},
   routingTimeoutMs = 1500, // hard deadline for the external map API (an answer slower than 5 s counts as an outage anyway)
@@ -59,14 +59,14 @@ export function createApp({
   smsNumber = process.env.SMS_NUMBER || '1234',
   trustProxy = process.env.TRUST_PROXY === '1',
 } = {}) {
-  const auth = authOpt ?? new Auth({ now, secret: jwtSecret, staticTokens: staticTokens ? defaultTokens() : null });
+  const auth = authOpt ?? new Auth({ now, keys, staticTokens: staticTokens ? defaultTokens() : null });
   const store = new Store(data, { now, cancelWindowMs });
   const graph = new RoadGraph([...data.districts, ...data.points]);
   const breaker = new CircuitBreaker({ now, ...breakerOpts });
   const routing = new RoutingService(graph, store.chaos, { timeoutMs: routingTimeoutMs, now, breaker });
   const evacuation = new EvacuationService(store, routing);
   const crisis = new CrisisEngine(store, rules, { graph });
-  const sessions = new Sessions(tokenSecret);
+  const sessions = new Sessions(tokenSecret ?? keys?.deviceSecret);
   const guard = new AbuseGuard(store, () => crisis.rules);
   store.guard = guard;
   const audit = new Audit({ now });
