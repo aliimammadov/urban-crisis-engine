@@ -439,3 +439,15 @@ export function createApp({
   const routeTable = () => routes.map((r) => ({ method: r.method, path: r.path, perm: r.opts.perm ?? null }));
   return { server, store, graph, history, audit, broadcasts, sms, routing, breaker, shield, sessions, routeTable, routing, evacuation, crisis, auth, handler };
 }
+
+// Serverless entry: Vercel's zero-config Node runtime picks up src/app.js and calls its default export once per request
+// ("The default export must be a function or server"). Same handler as `npm start`; the app is built on the first
+// request and reused while the instance stays warm (state is in memory, see README "Deployment").
+let platformApp = null;
+export default async function handler(req, res) {
+  if (!platformApp) {
+    const { loadKeys } = await import('./keystore.js');
+    platformApp = createApp({ keys: loadKeys('/tmp/urban-crisis-keys.json'), trustProxy: true }); // /tmp: the only writable path there
+  }
+  return platformApp.handler(req, res);
+}
