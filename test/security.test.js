@@ -191,3 +191,13 @@ test('Referrer-Policy still sends the origin (OpenStreetMap blocks tile requests
     assert.equal(r.headers.get('referrer-policy'), 'strict-origin-when-cross-origin');
   } finally { await s.stop(); }
 });
+
+test('keystore: a platform-supplied key (SIGNING_KEY_PEM) gives every instance the same keys', () => {
+  const { privateKey } = generateKeyPairSync('ed25519');
+  const pem = privateKey.export({ type: 'pkcs8', format: 'pem' });
+  const a = loadKeys(null, { SIGNING_KEY_PEM: pem }); const b = loadKeys(null, { SIGNING_KEY_PEM: pem.replace(/\n/g, '\\n') });
+  assert.equal(a.deviceSecret, b.deviceSecret);
+  const token = new Auth({ keys: a }).login('admin', 'admin-demo').token;
+  assert.equal(new Auth({ keys: b }).identify({ headers: { authorization: `Bearer ${token}` } })?.role, 'admin');
+  assert.throws(() => loadKeys(null, { SIGNING_KEY_PEM: generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs8', format: 'pem' }) }));
+});

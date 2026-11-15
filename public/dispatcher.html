@@ -74,6 +74,18 @@
   .pane { padding:14px; } .pane[hidden] { display:none; } .pane #scPanel { margin-top:16px; padding-top:14px; border-top:1px solid var(--line); }
   .kbadge { width:32px; height:32px; border-radius:10px; display:inline-flex; align-items:center; justify-content:center; flex:none; } .kbadge svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
   .bname { display:flex; align-items:center; gap:10px; min-width:0; }
+  .seg { position:relative; display:inline-flex; padding:3px; background:var(--soft); border:1px solid var(--line); border-radius:999px; }
+  .seg button { position:relative; z-index:1; border:0; background:none; padding:5px 12px; border-radius:999px; font:700 12.5px var(--head); letter-spacing:.03em; color:var(--muted); transition:color .2s ease; }
+  .seg button[aria-checked="true"] { color:var(--blue); } .seg button:hover { color:var(--ink); } .seg button[aria-checked="true"]:hover { color:var(--blue); }
+  .seg button:focus-visible { outline:2px solid var(--blue); outline-offset:1px; }
+  .seg button:disabled { cursor:progress; opacity:1; }
+  .segind { position:absolute; z-index:0; top:3px; bottom:3px; left:0; width:0; border-radius:999px; background:#fff; box-shadow:0 1px 3px rgba(11,11,15,.14), 0 0 0 1px rgba(11,11,15,.04); transition:transform .28s cubic-bezier(.3,.8,.3,1), width .28s cubic-bezier(.3,.8,.3,1); }
+  .tabs { position:relative; } .tabind { position:absolute; bottom:0; left:0; height:2px; width:0; background:var(--blue); border-radius:2px 2px 0 0; transition:transform .3s cubic-bezier(.3,.8,.3,1), width .3s cubic-bezier(.3,.8,.3,1); pointer-events:none; }
+  .tabs button[aria-selected="true"] { border-bottom-color:transparent; }
+  .tabs button { transition:color .2s ease; }
+  @keyframes pane-in { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:none; } }
+  .tabcard > .pane:not([hidden]) { animation:pane-in .24s ease-out; }
+  @media (prefers-reduced-motion:reduce) { .segind, .tabind { transition:none; } .tabcard > .pane:not([hidden]) { animation:none; } }
   .state { border-radius:999px; padding:2px 10px; font-size:12px; font-weight:600; }
   .sim { display:flex; gap:6px; flex-wrap:wrap; align-items:center; } .sim button { border:1px solid var(--line); background:#fff; border-radius:10px; padding:6px 10px; font-size:13px; }
   #login { position:fixed; inset:0; z-index:5000; background:rgba(11,11,15,.55); display:none; align-items:center; justify-content:center; padding:16px; } #login.on { display:flex; }
@@ -131,7 +143,8 @@
   <div class="pill"><span class="live"></span><span id="clock"></span></div>
   <div class="pill ok" id="apiPill"></div>
   <div class="pill" id="who" style="display:none"></div><button id="logout" class="pill" style="display:none;cursor:pointer;border:0"></button>
-  <select id="lang"><option value="az">AZ</option><option value="en">EN</option><option value="ru">RU</option></select>
+  <select id="lang" hidden><option value="az">AZ</option><option value="en">EN</option><option value="ru">RU</option></select>
+  <div class="seg" id="langSeg" role="radiogroup" data-i18n-aria="d.language"><span class="segind" aria-hidden="true"></span><button type="button" role="radio" data-lang="az">AZ</button><button type="button" role="radio" data-lang="en">EN</button><button type="button" role="radio" data-lang="ru">RU</button></div>
 </header>
 
 <div id="protect" style="display:none;background:#b4231a;color:#fff;padding:10px 18px;font:600 14px var(--head)"></div>
@@ -222,7 +235,24 @@ let replay = null;
 let historyRequest = null;
 
 await loadLang(localStorage.getItem('lang') || 'az');
-$('lang').value = state.lang;
+function slideTo(b) { // move the pill at once (optimistic); the language itself loads right after
+  const seg = $('langSeg'); const ind = seg.querySelector('.segind');
+  seg.querySelectorAll('[data-lang]').forEach((x) => { x.setAttribute('aria-checked', x === b); x.tabIndex = x === b ? 0 : -1; });
+  ind.style.width = `${b.offsetWidth}px`; ind.style.transform = `translateX(${b.offsetLeft - 3}px)`;
+}
+function paintLang() {
+  const seg = $('langSeg'); const on = seg.querySelector(`[data-lang="${state.lang}"]`);
+  seg.querySelectorAll('[data-lang]').forEach((b) => { b.setAttribute('aria-checked', b === on); b.tabIndex = b === on ? 0 : -1; b.disabled = $('lang').disabled; });
+  const ind = seg.querySelector('.segind');
+  if (on) { ind.style.width = `${on.offsetWidth}px`; ind.style.transform = `translateX(${on.offsetLeft - 3}px)`; }
+}
+$('lang').value = state.lang; paintLang(); document.fonts?.ready.then(paintLang); addEventListener('resize', paintLang);
+$('langSeg').addEventListener('click', (e) => { const b = e.target.closest('[data-lang]'); if (b && b.dataset.lang !== state.lang && !b.disabled) { slideTo(b); $('lang').value = b.dataset.lang; $('lang').dispatchEvent(new Event('change')); } });
+$('langSeg').addEventListener('keydown', (e) => {
+  if (!['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+  const bs = [...$('langSeg').querySelectorAll('[data-lang]')]; const i = bs.findIndex((b) => b.dataset.lang === state.lang);
+  const n = bs[(i + (e.key === 'ArrowRight' ? 1 : bs.length - 1)) % bs.length]; n.click(); n.focus();
+});
 $('lang').addEventListener('change', () => act(async () => {
   $('lang').disabled = true;
   const swap = async () => {
@@ -236,7 +266,7 @@ $('lang').addEventListener('change', () => act(async () => {
   try {
     if (document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) await document.startViewTransition(swap).finished;
     else await swap();
-  } finally { $('lang').value = state.lang; $('lang').disabled = false; }
+  } finally { $('lang').value = state.lang; $('lang').disabled = false; paintLang(); }
 }));
 
 function toast(msg, err = false) { const el = $('toast'); el.textContent = msg; el.className = `show ${err ? 'err' : ''}`; clearTimeout(toast.t); toast.t = setTimeout(() => { el.className = ''; }, 3200); }
@@ -269,11 +299,14 @@ statics();
 function initTabs(rootId, key, fallback) {
   const root = $(rootId); const card = root.closest('.tabcard');
   const btns = () => [...root.querySelectorAll('[data-tab]')];
+  const ind = document.createElement('span'); ind.className = 'tabind'; ind.setAttribute('aria-hidden', 'true'); root.append(ind);
+  const moveInd = () => { const on = btns().find((b) => b.getAttribute('aria-selected') === 'true'); if (!on) return; ind.style.width = `${on.offsetWidth}px`; ind.style.transform = `translateX(${on.offsetLeft}px)`; };
   const select = (id) => {
     if (!btns().some((b) => b.dataset.tab === id)) id = fallback;
     btns().forEach((b) => { const on = b.dataset.tab === id; b.setAttribute('aria-selected', on); b.tabIndex = on ? 0 : -1; });
     card.querySelectorAll(':scope > .pane').forEach((p) => { p.hidden = p.dataset.pane !== id; });
     try { localStorage.setItem(key, id); } catch { /* private mode */ }
+    moveInd();
   };
   root.addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) select(b.dataset.tab); });
   root.addEventListener('keydown', (e) => {
@@ -283,6 +316,8 @@ function initTabs(rootId, key, fallback) {
   });
   let saved = fallback; try { saved = localStorage.getItem(key) || fallback; } catch { /* ignore */ }
   select(saved);
+  addEventListener('resize', moveInd); document.fonts?.ready.then(moveInd);
+  new ResizeObserver(moveInd).observe(root); // labels change width with the language / badges
 }
 initTabs('tabsR', 'dtab', 'brig');
 initTabs('tabsL', 'dtabL', 'alerts');
