@@ -155,7 +155,7 @@ Dizayn istiqaməti: DevLink-in təmiz dili (`#0071e3`, Plus Jakarta Sans/Inter, 
 - Rol/icazə modeli (`auth.js`): vətəndaş, müşahidəçi (oxu), dispetçer, admin. Token müqayisəsi `timingSafeEqual` ilə.
 - Giriş yoxlaması (SOS növü, koordinat, ölçü), 16 KB sorğu limiti, sürət limitləri (SOS, sessiya, ümumi), statik fayllarda path-traversal qoruması, UI-da HTML escape.
 - **Məxfilik:** dispetçer paneli və tarixçə kadrları IP, cihaz və vətəndaş identifikatorlarını **daşımır** (testlə yoxlanılır). Not sahəsi 280 simvolla məhdudlaşıb.
-- Demo tokenləri (`admin-demo` və s.) yalnız demo üçündür. `NODE_ENV=production` və defolt token olduqda server xəbərdarlıq yazır. Real yerləşdirmədə `ADMIN_TOKEN`, `DISPATCHER_TOKEN`, `TOKEN_SECRET` dəyişdirilməlidir.
+- Demo giriş parolları (`admin-demo`, `dispatcher-demo`, `observer-demo`) yalnız demo üçündür; server defolt parollarla başlayanda xəbərdarlıq yazır. Real yerləşdirmədə `ADMIN_PASSWORD`, `DISPATCHER_PASSWORD`, `OBSERVER_PASSWORD` dəyişdirilməlidir. İmza açarları üçün heç bir gizli söz konfiqurasiya olunmur (bax Drop 3).
 
 ## Challenge Drop hazırlığı
 
