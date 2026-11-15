@@ -554,7 +554,7 @@ function renderRouting(apiDown) {
     <div class="row"><span>${esc(tr('d.sim.api'))}</span><b>${esc(tr('d.routing.state.' + br.state))}</b></div>
     ${br.lastError && (degraded || br.state !== 'closed') ? `<div class="row"><span>⚠</span><span>${esc(routingErr(br))}</span></div>` : ''}
     ${br.state === 'open' ? `<div class="row"><span>${esc(fmt('d.routing.retry', { s: left }))}</span><span></span></div>` : ''}
-    <div class="row"><span>${esc(fmt('d.routing.cache', { n: rt.cacheSize }))}</span><span>${br.failures}/${br.calls} ✗</span></div>
+    <div class="row"><span>${esc(fmt('d.routing.cache', { n: rt.cacheSize }))}</span><span>${esc(fmt('d.routing.fails', { f: br.failures, c: br.calls }))}</span></div>
     <div class="srcs">${['external', 'cache', 'matrix', 'local'].map((k) => `<span>${esc(tr('d.routing.src.' + k))}: ${rt.served[k] ?? 0}</span>`).join('')}</div>`;
 }
 
