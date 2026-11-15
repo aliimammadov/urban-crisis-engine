@@ -62,6 +62,39 @@
   #login form { background:#fff; border-radius:20px; padding:22px; width:340px; display:flex; flex-direction:column; gap:12px; } #login h2 { margin:0; font:800 22px var(--head); letter-spacing:-0.04em; }
   #login button { height:48px; border:0; border-radius:14px; background:var(--blue); color:#fff; font:700 16px var(--head); }
   #toast { position:fixed; left:50%; bottom:18px; transform:translate(-50%,120px); background:#0b0b0f; color:#fff; padding:12px 18px; border-radius:12px; transition:.25s; z-index:6000; font-weight:600; } #toast.show { transform:translate(-50%,0); } #toast.err { background:var(--red-ink); }
+  .tm { display:grid; grid-template-columns:auto auto minmax(100px,1fr) auto; gap:10px; }
+  .tm .tmlabel { grid-column:1 / -1; grid-row:2; min-width:0; text-align:left; font-variant-numeric:tabular-nums; height:19px; }
+  .tm .tmbtn { min-width:90px; min-height:36px; }
+  .tm .tmbtn.live { width:auto; height:auto; border-radius:10px; }
+  .tmtrack { position:relative; min-width:0; }
+  #tmRange { width:100%; margin:0; padding:0; height:6px; display:block; appearance:none; border:0; border-radius:8px; background:linear-gradient(to right,var(--blue) var(--progress,100%),var(--line) var(--progress,100%)); cursor:pointer; }
+  #tmRange::-webkit-slider-thumb { appearance:none; width:15px; height:15px; border-radius:50%; background:var(--blue); border:3px solid #fff; box-shadow:0 0 0 1px var(--blue); }
+  #tmTicks { position:absolute; inset:10px 7px auto; height:5px; pointer-events:none; }
+  #tmTicks i { position:absolute; height:5px; width:2px; background:#a4b5c8; }
+  #scPanel { overflow:hidden; }
+  #scList { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr)); gap:8px; max-height:285px; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
+  .sc { margin:0; display:grid; grid-template-columns:1fr auto; gap:4px 8px; align-items:start; }
+  .sc span { grid-column:1 / -1; grid-row:2; margin:0; }
+  .sc button { grid-column:2; grid-row:1; }
+  #scPanel .sim { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+  #scPanel .sim:has(#simPoint) { grid-template-columns:minmax(0,1fr) 90px; }
+  #scPanel .sim:has(#simPoint) button { grid-column:1 / -1; }
+  .percentage { display:flex; align-items:center; gap:4px; }
+  main { align-items:flex-start; }
+  #mapbox { flex:none; height:clamp(440px,60vh,720px); }
+  .replaybanner { top:auto; bottom:28px; max-width:86%; text-align:center; }
+  #scPanel select { min-width:0; width:100%; text-overflow:ellipsis; }
+  #scPanel .sim button { white-space:normal; overflow-wrap:anywhere; }
+  #scPanel[open] > :not(summary) { animation:panel-in .2s ease-out; }
+  @keyframes panel-in { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
+  @media (max-width:600px) { main { padding:12px; } .left,.right { max-width:none; } .tm { grid-template-columns:auto auto 1fr; } .tmtrack { grid-column:1 / -1; grid-row:2; } .tm .tmlabel { grid-row:3; } .tm #tmLive { justify-self:end; } }
+  @media (prefers-reduced-motion:reduce) { #scPanel[open] > :not(summary) { animation:none; } }
+  ::view-transition-old(root), ::view-transition-new(root) { animation-duration:160ms; }
+  @supports (interpolate-size:allow-keywords) {
+    #scPanel { interpolate-size:allow-keywords; }
+    #scPanel::details-content { height:0; overflow:clip; transition:height .22s ease,content-visibility .22s allow-discrete; }
+    #scPanel[open]::details-content { height:auto; }
+  }
 </style>
 </head>
 <body>
@@ -87,9 +120,10 @@
     <div id="mapbox"><div id="map"></div><div class="legend" id="legend"></div><div class="replaybanner" id="replayBanner" hidden></div></div>
     <div class="card tm" id="tm">
       <button id="tmPlay" class="tmbtn"></button>
-      <input id="tmRange" type="range" min="0" max="0" value="0" data-i18n-aria="d.history">
+      <select id="tmSpeed" aria-label="Playback speed"><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="2">2x</option><option value="4">4x</option></select>
+      <div class="tmtrack"><div id="tmTicks" aria-hidden="true"></div><input id="tmRange" type="range" min="0" max="100" step="any" value="100" data-i18n-aria="d.history"></div>
       <span id="tmLabel" class="tmlabel"></span>
-      <button id="tmLive" class="tmbtn" hidden></button>
+      <button id="tmLive" class="tmbtn"></button>
     </div>
   </section>
 
@@ -100,7 +134,7 @@
       <div id="scList" style="margin-top:10px"></div>
       <div class="lbl" id="tManual" style="margin-top:14px"></div>
       <div class="sim" style="margin-top:6px">
-        <select id="simPoint"></select><input id="simPct" type="number" min="0" max="100" value="96" style="width:64px">%<button id="simSet"></button>
+        <select id="simPoint"></select><label class="percentage"><input id="simPct" type="number" min="0" max="100" value="96" style="width:64px">%</label><button id="simSet"></button>
       </div>
       <div class="sim" style="margin-top:8px"><button id="secMode" title=""></button></div>
       <div class="sim" style="margin-top:8px"><button id="chaosOn"></button><button id="chaosOff"></button><button id="roadRandom"></button><button id="reset"></button></div>
@@ -119,11 +153,26 @@ const TONE = { FIRE: ['#fdeceb', '#b4231a'], COLLAPSE: ['#fff1de', '#8f4700'], F
 let token = localStorage.getItem('dtoken') || '';
 let snap = null; let snapAt = 0; let es = null; let roads = [];
 let map; const L2 = {}; let rules = {}; let scenarios = [];
-let replay = null; // {frames, i, timer} while the time machine is active
+let replay = null;
+let historyRequest = null;
 
 await loadLang(localStorage.getItem('lang') || 'az');
 $('lang').value = state.lang;
-$('lang').addEventListener('change', async () => { await loadLang($('lang').value); statics(); snap && render(); });
+$('lang').addEventListener('change', () => act(async () => {
+  $('lang').disabled = true;
+  const swap = async () => {
+    await loadLang($('lang').value); statics(); snap && render();
+    const value = $('simPoint').value;
+    $('simPoint').replaceChildren();
+    if (snap) renderSide();
+    $('simPoint').value = value;
+    if (replay) showFrame(replay.i);
+  };
+  try {
+    if (document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) await document.startViewTransition(swap).finished;
+    else await swap();
+  } finally { $('lang').value = state.lang; $('lang').disabled = false; }
+}));
 
 function toast(msg, err = false) { const el = $('toast'); el.textContent = msg; el.className = `show ${err ? 'err' : ''}`; clearTimeout(toast.t); toast.t = setTimeout(() => { el.className = ''; }, 3200); }
 const act = async (fn) => { try { await fn(); } catch (e) { toast(e.message, true); } };
@@ -170,6 +219,7 @@ function render() {
   const apiDown = snap.chaos.externalDown;
   $('apiPill').className = `pill ${apiDown ? 'bad' : 'ok'}`; $('apiPill').textContent = apiDown ? tr('d.apiDown') : tr('d.apiOk');
   renderAbuse(); renderAlerts(); renderFeed(); renderQuarantine(); renderKpis(); renderSide(); drawMap();
+  if (replay) showFrame(replay.i);
 }
 
 const fmt = (key, vars) => Object.entries(vars).reduce((t, [k, v]) => t.replace(`{${k}}`, v), tr(key));
@@ -209,22 +259,26 @@ function checkReplayAlerts() {
 
 function renderTm() {
   $('tmPlay').textContent = replay?.timer ? `⏸ ${tr('d.pause')}` : `▶ ${tr('d.play')}`;
-  $('tmLive').textContent = `● ${tr('d.backToLive')}`; $('tmLive').className = 'tmbtn live'; $('tmLive').hidden = !replay;
+  $('tmLive').textContent = replay ? `● ${tr('d.backToLive')}` : '● LIVE'; $('tmLive').className = 'tmbtn live'; $('tmLive').disabled = !replay;
   $('replayBanner').hidden = !replay; $('replayBanner').textContent = tr('d.historyMode');
-  const f = replay?.frames[replay.i];
-  $('tmLabel').textContent = f ? `${fmtT(f.t)} · ${tr('d.frame')} ${f.sosTotal} · ${f.alerts.filter((a) => a[3] === 'open').length} ${tr('d.alerts').toLowerCase()}` : tr('d.history');
+  const f = replay && frameAt(replay.frames, replay.i);
+  $('tmPlay').setAttribute('aria-pressed', String(!!replay?.timer));
+  $('tmRange').style.setProperty('--progress', `${replay ? replay.i / Math.max(1, replay.frames.length - 1) * 100 : 100}%`);
+  $('tmLabel').textContent = f ? `${fmtT(f.t)} · ${tr('d.frame')} ${Math.round(f.sosTotal)} · ${f.alerts.filter((a) => a[3] === 'open').length} ${tr('d.alerts').toLowerCase()}` : tr('d.history');
 }
 async function enterReplay() {
   if (replay) return true;
-  const h = await api('GET', '/api/dashboard/history?minutes=120', { token });
+  const h = await (historyRequest ||= api('GET', '/api/dashboard/history?minutes=120', { token }).finally(() => { historyRequest = null; }));
+  if (replay) return true;
   if (!h.frames.length) { toast(tr('d.noHistory'), true); return false; }
   replay = { frames: h.frames, i: h.frames.length - 1, timer: null, touched: Date.now(), known: new Set((snap?.alerts ?? []).filter((a) => a.status === 'open').map((a) => a.id)) };
-  $('tmRange').max = h.frames.length - 1; $('tmRange').value = replay.i;
+  $('tmRange').max = Math.max(1, h.frames.length - 1); $('tmRange').value = replay.i;
+  $('tmTicks').innerHTML = h.frames.map((f, i, frames) => i && JSON.stringify([f.alerts, f.closed]) !== JSON.stringify([frames[i - 1].alerts, frames[i - 1].closed]) ? `<i style="left:${i / Math.max(1, frames.length - 1) * 100}%" title="${fmtT(f.t)}"></i>` : '').join('');
   return true;
 }
 function leaveReplay() {
-  if (replay?.timer) clearInterval(replay.timer);
-  replay = null; $('tmRange').value = $('tmRange').max; renderTm(); if (snap) drawMap();
+  if (replay?.timer) cancelAnimationFrame(replay.timer);
+  replay = null; $('tmRange').value = $('tmRange').max; renderTm(); if (snap) render();
 }
 function drawFrame(f) {
   ensureMap(); if (!map || !snap) return;
@@ -233,7 +287,7 @@ function drawFrame(f) {
   for (const [id, occ, active] of f.points) {
     const p = snap.points.find((x) => x.id === id); if (!p) continue;
     const pct = Math.round((occ / p.capacity) * 1000) / 10;
-    L.circleMarker([p.lat, p.lng], { radius: active ? 12 : 6, color: '#fff', weight: 3, fillColor: active ? pctColor(pct) : '#9ca3af', fillOpacity: 1 }).bindTooltip(`${name(p.name)} ${pct}%`).addTo(L2.points);
+    L.circleMarker([p.lat, p.lng], { radius: active ? 10 + Math.min(100, pct) / 25 : 6, color: '#fff', weight: 3, fillColor: active ? pctColor(pct) : '#9ca3af', fillOpacity: 1 }).bindTooltip(`${name(p.name)} ${pct}%`).addTo(L2.points);
   }
   for (const [la, ln, type] of f.sos) L.circleMarker([la, ln], { radius: 6, color: '#fff', weight: 2, fillColor: '#ff3b30', fillOpacity: 1 }).bindTooltip(tr('sos.' + type)).addTo(L2.sos);
   for (const [id, st] of f.brigades) {
@@ -241,22 +295,53 @@ function drawFrame(f) {
     L.marker([b.lat, b.lng], { icon: L.divIcon({ className: '', iconSize: [22, 22], html: `<div style="width:22px;height:22px;border-radius:6px;background:#0071e3;border:3px solid #fff;opacity:${st === 'available' ? 1 : .55}"></div>` }) }).bindTooltip(`${b.name} · ${tr('brigade.' + st)}`).addTo(L2.brigades);
   }
 }
-function showFrame(i) { replay.i = i; $('tmRange').value = i; drawFrame(replay.frames[i]); renderTm(); }
+function frameAt(frames, position) {
+  const i = Math.floor(position), a = frames[i], b = frames[Math.min(i + 1, frames.length - 1)];
+  const mix = (x, y) => x + (y - x) * (position - i);
+  return { ...a, t: mix(a.t, b.t), sosTotal: mix(a.sosTotal, b.sosTotal),
+    points: a.points.map(([id, occ, active]) => [id, mix(occ, b.points.find((p) => p[0] === id)?.[1] ?? occ), active]) };
+}
+function showFrame(i) {
+  replay.i = Math.max(0, Math.min(i, replay.frames.length - 1));
+  const f = frameAt(replay.frames, replay.i);
+  $('tmRange').value = replay.i; drawFrame(f); renderTm();
+  const values = $('kpis').querySelectorAll('b');
+  if (values.length) {
+    values[0].textContent = Math.round(f.sosTotal);
+    values[1].textContent = f.alerts.filter((a) => a[3] === 'open' && a[2] === 'red').length;
+    values[2].textContent = '-'; values[3].textContent = '-';
+    values[4].textContent = `${f.brigades.filter((b) => b[1] === 'available').length}/${f.brigades.length}`;
+  }
+  $('points').innerHTML = f.points.filter((p) => p[2]).map(([id, occ]) => {
+    const p = snap.points.find((p) => p.id === id); if (!p) return '';
+    const pct = Math.round(occ / p.capacity * 1000) / 10;
+    return `<div class="prow"><div><span>${esc(name(p.name))}</span><b style="color:${pctColor(pct)}">${pct}%</b></div><div class="bar"><i style="width:${Math.min(100, pct)}%;background:${pctColor(pct)}"></i></div></div>`;
+  }).join('');
+}
 $('tmRange').addEventListener('input', () => act(async () => {
+  const fraction = Number($('tmRange').value) / Number($('tmRange').max);
   if (!(await enterReplay())) return;
-  if (replay.timer) { clearInterval(replay.timer); replay.timer = null; }
-  replay.touched = Date.now();
-  const i = Number($('tmRange').value);
-  if (i >= replay.frames.length - 1) { leaveReplay(); return; } // slider at the right edge = now = live
-  showFrame(i);
+  if (replay.timer) cancelAnimationFrame(replay.timer);
+  replay.timer = null; replay.touched = Date.now();
+  if (fraction >= 1) { leaveReplay(); return; }
+  showFrame(fraction * (replay.frames.length - 1));
 }));
 $('tmPlay').addEventListener('click', () => act(async () => {
   if (!(await enterReplay())) return;
-  if (replay.timer) { clearInterval(replay.timer); replay.timer = null; renderTm(); return; }
-  if (replay.i >= replay.frames.length - 1) replay.i = 0;
   replay.touched = Date.now();
+  if (replay.timer) { cancelAnimationFrame(replay.timer); replay.timer = null; renderTm(); return; }
+  if (replay.i >= replay.frames.length - 1) replay.i = 0;
   showFrame(replay.i);
-  replay.timer = setInterval(() => { if (replay.i >= replay.frames.length - 1) { leaveReplay(); return; } showFrame(replay.i + 1); }, 250); // the replay ends where "now" begins: back to live
+  let last = null;
+  const tick = (now) => {
+    if (!replay) return;
+    const elapsed = last === null ? 0 : Math.min(now - last, 100);
+    last = now;
+    showFrame(replay.i + elapsed / 1200 * Number($('tmSpeed').value));
+    if (replay.i >= replay.frames.length - 1) { leaveReplay(); return; }
+    replay.timer = requestAnimationFrame(tick);
+  };
+  replay.timer = requestAnimationFrame(tick);
   renderTm();
 }));
 $('tmLive').addEventListener('click', leaveReplay);
@@ -288,7 +373,7 @@ function alertCard(a) {
         <div>${brig ? `<span style="color:#6d3fd8">▸</span><span><b>${esc(brig.name)}</b> ${esc(brig.fallback ? tr('d.accVehicleFallback') : tr('d.accVehicle'))} ~${brig.etaMin} ${esc(tr('d.min'))}</span>` : `<span>⚠</span><span>${esc(tr('d.noAccVehicle'))}</span>`}</div>
         <div>${apt ? `<span style="color:#1a9e55">▸</span><span>${esc(tr('d.accPoint'))}: <b>${esc(name(apt.name))}</b> · ${apt.distanceM} ${esc(tr('ui.meters'))} ${(apt.access ?? []).map((x) => `<span class="accfeat">${esc(tr('acc.' + x))}</span>`).join('')}</span>` : `<span>⚠</span><span>${esc(tr('d.noAccPoint'))}</span>`}</div></div>`;
   const planHtml = prio && !done ? prioPlan : done
-    ? `<div class="plan"><div>✓ <span><b>${esc(a.result.brigadeId ?? '—')}</b>${a.result.etaMin ? ` · ~${a.result.etaMin} ${esc(tr('d.min'))}` : ''}</span></div>${prio ? '' : `<div>✓ <span><b>${esc(name(snap.points.find((p) => p.id === a.result.openedPointId)?.name) ?? '—')}</b></span></div>`}</div>`
+    ? `<div class="plan"><div>✓ <span><b>${esc(a.result.brigadeId ?? '-')}</b>${a.result.etaMin ? ` · ~${a.result.etaMin} ${esc(tr('d.min'))}` : ''}</span></div>${prio ? '' : `<div>✓ <span><b>${esc(name(snap.points.find((p) => p.id === a.result.openedPointId)?.name) ?? '-')}</b></span></div>`}</div>`
     : `<div class="plan"><div class="lbl" style="margin:0">${esc(tr('d.after'))}</div>
         ${amber ? '' : `<div>${brig ? `<span style="color:#0071e3">▸</span><span><b>${esc(brig.name)}</b> ${esc(tr('d.sendsBrigade'))} ~${brig.etaMin} ${esc(tr('d.min'))}</span>` : `<span>⚠</span><span>${esc(tr('d.noBrigade'))}</span>`}</div>`}
         <div>${pt ? `<span style="color:#1a9e55">▸</span><span><b>${esc(name(pt.name))}</b> ${esc(tr('d.opensPoint'))} ${pt.capacity}</span>` : `<span>⚠</span><span>${esc(tr('d.noReserve'))}</span>`}</div></div>`;

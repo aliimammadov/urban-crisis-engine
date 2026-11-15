@@ -2,10 +2,12 @@
 export const state = { lang: localStorage.getItem('lang') || 'az', messages: {} };
 
 export async function loadLang(lang) {
+  const r = await fetch(`/api/i18n/${lang}`);
+  if (!r.ok) throw new Error(r.statusText);
+  const messages = (await r.json()).messages;
   state.lang = lang;
   localStorage.setItem('lang', lang);
-  const r = await fetch(`/api/i18n/${lang}`);
-  state.messages = (await r.json()).messages;
+  state.messages = messages;
   document.documentElement.lang = lang;
   document.title = tr('app.title');
   document.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = tr(el.dataset.i18n); });
