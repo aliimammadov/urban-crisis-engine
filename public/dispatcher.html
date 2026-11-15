@@ -67,6 +67,13 @@
   .bar { height:6px; border-radius:3px; background:var(--soft); margin-top:6px; overflow:hidden; } .bar i { display:block; height:100%; }
   .prow { margin-bottom:12px; } .prow > div:first-child { display:flex; justify-content:space-between; font-size:13.5px; font-weight:500; }
   .brow { display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-top:1px solid #f0f1f4; font-size:13.5px; gap:8px; } .brow:first-of-type { border-top:0; }
+  .tabcard { padding:0; overflow:hidden; }
+  .tabs { display:flex; gap:2px; overflow-x:auto; padding:0 10px; border-bottom:1px solid var(--line); scrollbar-width:none; } .tabs::-webkit-scrollbar { display:none; }
+  .tabs button { flex:none; border:0; background:none; padding:13px 8px; font:600 13px var(--head); color:var(--muted); cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; white-space:nowrap; }
+  .tabs button:hover { color:var(--ink); } .tabs button[aria-selected="true"] { color:var(--blue); border-bottom-color:var(--blue); }
+  .pane { padding:14px; } .pane[hidden] { display:none; } .pane #scPanel { margin-top:16px; padding-top:14px; border-top:1px solid var(--line); }
+  .kbadge { width:32px; height:32px; border-radius:10px; display:inline-flex; align-items:center; justify-content:center; flex:none; } .kbadge svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+  .bname { display:flex; align-items:center; gap:10px; min-width:0; }
   .state { border-radius:999px; padding:2px 10px; font-size:12px; font-weight:600; }
   .sim { display:flex; gap:6px; flex-wrap:wrap; align-items:center; } .sim button { border:1px solid var(--line); background:#fff; border-radius:10px; padding:6px 10px; font-size:13px; }
   #login { position:fixed; inset:0; z-index:5000; background:rgba(11,11,15,.55); display:none; align-items:center; justify-content:center; padding:16px; } #login.on { display:flex; }
@@ -126,18 +133,6 @@
     <div id="alerts" style="display:flex;flex-direction:column;gap:12px"></div>
     <div class="card" id="pendCard" hidden><div class="lbl" id="tPend"></div><div class="small" id="pendHint" style="text-align:left;margin-bottom:8px"></div><div id="pending"></div></div>
     <div class="card" id="quarCard" hidden><div class="lbl" id="tSusp"></div><div class="small" id="suspNote" style="text-align:left;margin-bottom:8px"></div><div class="feed" id="quar"></div></div>
-    <details class="card" id="bcCard"><summary class="lbl" id="bcSummary" style="cursor:pointer;margin:0"></summary>
-      <div class="bcform">
-        <label for="bcType" id="bcLType"></label><select id="bcType"></select>
-        <label for="bcTarget" id="bcLTarget"></label><select id="bcTarget"></select>
-        <select id="bcDistrict" hidden></select>
-        <div id="bcPointRow" hidden><label for="bcPoint" id="bcLPoint"></label><select id="bcPoint"></select></div>
-        <div id="bcTextRow" hidden><textarea id="bcTextAz" maxlength="280" rows="2"></textarea><textarea id="bcTextEn" maxlength="280" rows="2"></textarea></div>
-        <div class="bcprev" id="bcPreview"></div>
-        <button id="bcSend" class="approve" style="height:44px;font-size:15px"></button>
-      </div>
-      <div class="lbl" id="bcHistTitle" style="margin-top:14px"></div><div id="bcHistory"></div>
-    </details>
     <div class="card"><div class="lbl" id="tFeed"></div><div class="feed" id="feed"></div></div>
   </section>
 
@@ -154,11 +149,30 @@
   </section>
 
   <section class="col right">
-    <div class="card"><div class="lbl" id="tPoints"></div><div id="points"></div></div>
-    <div class="card rt"><div class="lbl" id="tRouting"></div><div id="routing"></div></div>
-    <div class="card"><div class="lbl" id="tBrigades"></div><div id="brigades"></div></div>
-    <div class="card"><div class="lbl" id="tJournal"></div><div class="feed" id="journal"></div></div>
-    <details class="card" id="scPanel" hidden><summary class="lbl" id="scSummary" style="cursor:pointer;margin:0"></summary>
+    <div class="card tabcard">
+      <div class="tabs" role="tablist" id="tabs">
+        <button role="tab" data-tab="brig" id="tabBrig"></button><button role="tab" data-tab="points" id="tabPoints"></button><button role="tab" data-tab="bc" id="tabBc"></button><button role="tab" data-tab="log" id="tabLog"></button><button role="tab" data-tab="sys" id="tabSys"></button>
+      </div>
+      <div class="pane" data-pane="brig" role="tabpanel"><div class="lbl" id="tBrigades" hidden></div><div id="brigades"></div></div>
+      <div class="pane" data-pane="points" role="tabpanel" hidden><div class="lbl" id="tPoints" hidden></div><div id="points"></div></div>
+      <div class="pane" data-pane="bc" role="tabpanel" hidden>
+    <div id="bcCard"><div class="lbl" id="bcSummary" hidden></div>
+      <div class="bcform">
+        <label for="bcType" id="bcLType"></label><select id="bcType"></select>
+        <label for="bcTarget" id="bcLTarget"></label><select id="bcTarget"></select>
+        <select id="bcDistrict" hidden></select>
+        <div id="bcPointRow" hidden><label for="bcPoint" id="bcLPoint"></label><select id="bcPoint"></select></div>
+        <div id="bcTextRow" hidden><textarea id="bcTextAz" maxlength="280" rows="2"></textarea><textarea id="bcTextEn" maxlength="280" rows="2"></textarea></div>
+        <div class="bcprev" id="bcPreview"></div>
+        <button id="bcSend" class="approve" style="height:44px;font-size:15px"></button>
+      </div>
+      <div class="lbl" id="bcHistTitle" style="margin-top:14px"></div><div id="bcHistory"></div>
+    </div>
+      </div>
+      <div class="pane" data-pane="log" role="tabpanel" hidden><div class="lbl" id="tJournal" hidden></div><div class="feed" id="journal"></div></div>
+      <div class="pane" data-pane="sys" role="tabpanel" hidden>
+        <div class="rt"><div class="lbl" id="tRouting"></div><div id="routing"></div></div>
+    <div id="scPanel" hidden><div class="lbl" id="scSummary"></div>
       <div id="scList" style="margin-top:10px"></div>
       <div class="lbl" id="tManual" style="margin-top:14px"></div>
       <div class="sim" style="margin-top:6px">
@@ -167,7 +181,9 @@
       <div class="sim" style="margin-top:8px"><button id="secMode" title=""></button></div>
       <div class="sim" style="margin-top:8px"><span id="simSpeedL" class="small"></span><select id="simSpeed"><option value="1">x1</option><option value="5">x5</option><option value="10">x10</option><option value="30">x30</option></select></div>
       <div class="sim" style="margin-top:8px"><label class="small" id="simApiL" for="simApi"></label><select id="simApi"></select><button id="roadRandom"></button><button id="reset"></button></div>
-    </details>
+    </div>
+      </div>
+    </div>
   </section>
 </main>
 
@@ -210,6 +226,7 @@ function toast(msg, err = false) { const el = $('toast'); el.textContent = msg; 
 const act = async (fn) => { try { await fn(); } catch (e) { toast(e.message, true); } };
 
 function statics() {
+  $('tabBrig').textContent = tr('d.brigadesTitle'); $('tabPoints').textContent = tr('d.pointsTitle'); $('tabBc').textContent = tr('d.bc.title'); $('tabLog').textContent = tr('d.journal'); $('tabSys').textContent = tr('d.tab.system');
   $('tAlerts').textContent = tr('d.alerts'); $('tCritical').textContent = tr('d.criticalFirst'); $('tFeed').textContent = tr('d.lastSignals');
   $('tPoints').textContent = tr('d.pointsTitle'); $('tBrigades').textContent = tr('d.brigadesTitle');
   $('tPend').textContent = tr('d.pending.title'); $('pendHint').textContent = tr('d.pending.hint');
@@ -230,6 +247,23 @@ function statics() {
     .map(([c, k, m]) => `<span><span style="color:${c}">${m}</span> ${esc(tr(k))}</span>`).join('');
 }
 statics();
+
+// ---------------------------------------------------------------- right panel tabs
+function selectTab(id) {
+  const ids = [...document.querySelectorAll('#tabs [data-tab]')].map((b) => b.dataset.tab);
+  if (!ids.includes(id)) id = 'brig';
+  document.querySelectorAll('#tabs [data-tab]').forEach((b) => { const on = b.dataset.tab === id; b.setAttribute('aria-selected', on); b.tabIndex = on ? 0 : -1; });
+  document.querySelectorAll('.pane').forEach((p) => { p.hidden = p.dataset.pane !== id; });
+  try { localStorage.setItem('dtab', id); } catch { /* private mode */ }
+}
+$('tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) selectTab(b.dataset.tab); });
+$('tabs').addEventListener('keydown', (e) => {
+  if (!['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+  const bs = [...document.querySelectorAll('#tabs [data-tab]')]; const i = bs.findIndex((b) => b.getAttribute('aria-selected') === 'true');
+  const n = bs[(i + (e.key === 'ArrowRight' ? 1 : bs.length - 1)) % bs.length]; selectTab(n.dataset.tab); n.focus();
+});
+let savedTab = 'brig'; try { savedTab = localStorage.getItem('dtab') || 'brig'; } catch { /* ignore */ }
+selectTab(savedTab);
 
 // ---------------------------------------------------------------- login + stream
 function showLogin(msg = '') { $('login').classList.add('on'); $('loginErr').textContent = msg; $('user').value ||= 'dispatcher'; $('token').value = ''; ($('user').value ? $('token') : $('user')).focus(); }
@@ -519,6 +553,8 @@ function renderKpis() {
   $('kpis').innerHTML = k.map(([l, v, c]) => `<div class="kpi"><small>${esc(l)}</small><div><b style="color:${c}">${v}</b></div></div>`).join('');
 }
 
+const KIND = { fire: { bg: '#fdeceb', fg: '#b4231a', svg: '<path d="M12 3c.5 3 4.5 5 4.5 9.5a4.5 4.5 0 0 1-9 0c0-2 1-3.2 2-4 0 1.8.8 2.8 2 2.8C12 8.8 11 6.5 12 3z"/>' }, medical: { bg: '#eaf7ee', fg: '#0b7a42', svg: '<path d="M10 4h4v6h6v4h-6v6h-4v-6H4v-4h6z"/>' }, rescue: { bg: '#fff1de', fg: '#8f4700', svg: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.2"/><path d="M6.3 6.3l3.4 3.4M14.3 14.3l3.4 3.4M17.7 6.3l-3.4 3.4M9.7 14.3l-3.4 3.4"/>' }, accessible_transport: { bg: '#f3edff', fg: '#43228a', svg: '<circle cx="11" cy="4.5" r="1.6"/><path d="M11 8v6h5l2.5 5M11 11h4.5M7.5 13a5 5 0 1 0 6.5 6.5"/>' } };
+const kindBadge = (kind) => { const k = KIND[kind] ?? KIND.rescue; return `<span class="kbadge" style="background:${k.bg};color:${k.fg}" title="${esc(tr('brigade.kind.' + kind))}"><svg viewBox="0 0 24 24" aria-hidden="true">${k.svg}</svg></span>`; };
 function renderSide() {
   $('points').innerHTML = snap.points.filter((p) => p.active).sort((a, b) => b.occupancyPct - a.occupancyPct).map((p) =>
     `<div class="prow"><div><span>${esc(name(p.name))}</span><b style="color:${pctColor(p.occupancyPct)}">${p.occupancyPct}%</b></div><div class="bar"><i style="width:${Math.min(100, p.occupancyPct)}%;background:${pctColor(p.occupancyPct)}"></i></div></div>`).join('');
@@ -527,7 +563,7 @@ function renderSide() {
   const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   $('brigades').innerHTML = snap.brigades.map((b) => {
     const eta = left(b);
-    return `<div class="brow" style="flex-wrap:wrap"><span>${esc(b.name)}${b.kind === 'accessible_transport' ? ` <span class="accfeat">♿ ${esc(tr('d.accessibleTag'))}</span>` : ''}</span><span style="display:flex;gap:6px;align-items:center">${eta != null ? `<small style="color:var(--muted)">${mmss(eta)}</small>` : ''}<span class="state" style="background:${bs[b.status][0]};color:${bs[b.status][1]}">${esc(tr('brigade.' + b.status))}</span>${b.status !== 'available' ? `<button data-free="${b.id}" title="${esc(tr('d.freeUp'))}" style="border:1px solid var(--line);background:#fff;border-radius:8px;padding:2px 8px">✓</button>` : ''}</span>${b.progress != null ? `<div class="mv" style="flex-basis:100%"><i style="width:${Math.round(b.progress * 100)}%"></i></div>` : ''}</div>`;
+    return `<div class="brow" style="flex-wrap:wrap"><span class="bname">${kindBadge(b.kind)}<span>${esc(b.name)}</span></span><span style="display:flex;gap:6px;align-items:center">${eta != null ? `<small style="color:var(--muted)">${mmss(eta)}</small>` : ''}<span class="state" style="background:${bs[b.status][0]};color:${bs[b.status][1]}">${esc(tr('brigade.' + b.status))}</span>${b.status !== 'available' ? `<button data-free="${b.id}" title="${esc(tr('d.freeUp'))}" style="border:1px solid var(--line);background:#fff;border-radius:8px;padding:2px 8px">✓</button>` : ''}</span>${b.progress != null ? `<div class="mv" style="flex-basis:100%"><i style="width:${Math.round(b.progress * 100)}%"></i></div>` : ''}</div>`;
   }).join('');
   $('brigades').querySelectorAll('[data-free]').forEach((b) => b.addEventListener('click', () => act(() => api('POST', `/api/brigades/${b.dataset.free}/status`, { token, body: { status: 'available' } }))));
   const sel = $('simPoint'); if (!sel.options.length) sel.innerHTML = snap.points.filter((p) => p.active).map((p) => `<option value="${p.id}">${esc(name(p.name))}</option>`).join('');

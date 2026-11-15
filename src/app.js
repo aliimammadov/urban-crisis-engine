@@ -364,7 +364,8 @@ export function createApp({
 
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('Referrer-Policy', 'no-referrer');
+    // not 'no-referrer': OpenStreetMap tile servers answer 403 "Access blocked" to requests without a Referer
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.setHeader('Cache-Control', 'no-store');
 
     try {

@@ -159,3 +159,11 @@ test('flood does not block a genuine signed device', async () => {
     assert.equal(r.status, 201);
   } finally { await s.stop(); }
 });
+
+test('Referrer-Policy still sends the origin (OpenStreetMap blocks tile requests without a Referer)', async () => {
+  const s = await start();
+  try {
+    const r = await s.call('GET', '/dispatcher');
+    assert.equal(r.headers.get('referrer-policy'), 'strict-origin-when-cross-origin');
+  } finally { await s.stop(); }
+});
