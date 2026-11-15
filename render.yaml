@@ -1,0 +1,27 @@
+# Render Blueprint: one always-on Node web service runs everything (landing /landing, citizen app /, dispatcher /dispatcher, API).
+# Render dashboard -> New -> Blueprint -> pick this repo. No build step: the service has zero npm dependencies.
+services:
+  - type: web
+    name: cellsign-tech
+    runtime: node
+    plan: free                 # free instances sleep after ~15 min idle; first request then takes ~1 min, and in-memory state resets
+    region: frankfurt          # closest Render region to Baku
+    buildCommand: npm install
+    startCommand: npm start    # node src/server.js, listens on $PORT (set by Render)
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY       # Render's proxy sets X-Forwarded-For; without this every visitor shares one IP for rate limits and flood detection
+        value: "1"
+      # Staff passwords: leave empty to keep the demo logins (admin / admin-demo, dispatcher / dispatcher-demo, observer / observer-demo),
+      # or fill them in the Render dashboard before a public launch.
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: DISPATCHER_PASSWORD
+        sync: false
+      - key: OBSERVER_PASSWORD
+        sync: false
