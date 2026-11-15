@@ -6,6 +6,8 @@ export const DEFAULT_RULES = Object.freeze({
   windowMs: 5 * 60 * 1000,
   minDistinctReporters: 4,
   overcrowdPct: 95,
+  undoWindowMs: 10_000,       // dispatcher may revert an approval for this long
+  brigadeSpeedMPerMin: 600,   // ~36 km/h, used for ETA estimates
 });
 
 export const ALERT_ACTION = 'RED_DISPATCH_AND_OPEN_POINT';
@@ -120,6 +122,22 @@ export class CrisisEngine {
     return alert;
   }
 
+  /** What approve() WOULD do, without doing it (shown to the dispatcher before the click). */
+  plan(alert) {
+    const free = [...this.store.brigades.values()].filter((b) => b.status === 'available');
+    const b = nearest(alert.center, free);
+    const reserves = [...this.store.points.values()].filter((p) => !p.active);
+    const np = nearest(alert.center, reserves);
+    return {
+      brigade: b ? { id: b.item.id, name: b.item.name, etaMin: this.#eta(b.distance) } : null,
+      point: np ? { id: np.item.id, name: np.item.name, capacity: np.item.capacity } : null,
+    };
+  }
+
+  #eta(distanceM) {
+    return Math.max(1, Math.round(distanceM / this.rules.brigadeSpeedMPerMin));
+  }
+
   /** One-click decision: dispatch nearest free brigade + open nearest reserve assembly point. */
   approve(alertId, actor = 'dispatcher') {
     const alert = this.store.alerts.find((a) => a.id === alertId);
@@ -127,22 +145,56 @@ export class CrisisEngine {
     if (alert.status === 'approved') return alert; // idempotent
     if (alert.status !== 'open') throw new AppError(409, 'ALERT_NOT_OPEN');
 
-    const free = [...this.store.brigades.values()].filter((b) => b.status === 'available');
-    const b = nearest(alert.center, free)?.item ?? null;
+    const p = this.plan(alert);
+    const b = p.brigade ? this.store.brigades.get(p.brigade.id) : null;
     if (b) {
       b.status = 'dispatched';
       b.target = { ...alert.center };
       b.alertId = alert.id;
     }
-    const reserves = [...this.store.points.values()].filter((p) => !p.active);
-    const np = nearest(alert.center, reserves)?.item ?? null;
+    const np = p.point ? this.store.points.get(p.point.id) : null;
     if (np) np.active = true;
 
     alert.status = 'approved';
     alert.approvedAt = this.store.now();
     alert.approvedBy = actor;
-    alert.result = { brigadeId: b?.id ?? null, openedPointId: np?.id ?? null };
+    alert.result = { brigadeId: b?.id ?? null, openedPointId: np?.id ?? null, etaMin: p.brigade?.etaMin ?? null };
     this.store.emit('change', 'alert');
     return alert;
+  }
+
+  /** Reverts an approval inside rules.undoWindowMs (brigade freed, reserve point closed again). */
+  undo(alertId) {
+    const alert = this.store.alerts.find((a) => a.id === alertId);
+    if (!alert) throw new AppError(404, 'ALERT_NOT_FOUND');
+    if (alert.status !== 'approved') throw new AppError(409, 'ALERT_NOT_APPROVED');
+    if (this.store.now() - alert.approvedAt > this.rules.undoWindowMs) throw new AppError(409, 'UNDO_EXPIRED');
+
+    const b = this.store.brigades.get(alert.result.brigadeId);
+    if (b && b.alertId === alert.id) { b.status = 'available'; delete b.target; delete b.alertId; }
+    const np = this.store.points.get(alert.result.openedPointId);
+    if (np && np.occupied === 0) np.active = false;
+
+    alert.status = 'open';
+    delete alert.approvedAt; delete alert.approvedBy; delete alert.result;
+    this.store.emit('change', 'alert');
+    return alert;
+  }
+
+  /** Adds dispatcher-facing extras to a store snapshot: plan, SOS type counts, undo timer. */
+  decorate(snap) {
+    const recent = this.store.sos.slice(-2000);
+    snap.alerts = snap.alerts.map((a) => {
+      const out = { ...a };
+      if (a.type === 'SOS_CLUSTER') {
+        const ids = new Set(a.sosIds);
+        out.typeCounts = {};
+        for (const s of recent) if (ids.has(s.id)) out.typeCounts[s.type] = (out.typeCounts[s.type] ?? 0) + 1;
+      }
+      if (a.status === 'open') out.plan = this.plan(a);
+      if (a.status === 'approved') out.undoMsLeft = Math.max(0, a.approvedAt + this.rules.undoWindowMs - this.store.now());
+      return out;
+    });
+    return snap;
   }
 }

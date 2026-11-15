@@ -1,3 +1,5 @@
+import { ext } from './i18n-ext.js';
+
 // Messages are keyed, so a new language = one new object here (Challenge Drop: new language).
 export const DEFAULT_LANG = 'az';
 
@@ -111,6 +113,8 @@ export const dict = {
     'err.INTERNAL': 'Внутренняя ошибка',
   },
 };
+
+for (const lang of Object.keys(dict)) Object.assign(dict[lang], ext[lang]);
 
 export function resolveLang(candidate) {
   if (!candidate) return DEFAULT_LANG;

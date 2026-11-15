@@ -4,12 +4,12 @@ Zero-dependency prototype (Node ≥ 20, no `npm install`). Two modules in one se
 
 | Module | URL | What it does |
 |---|---|---|
-| Citizen | `/` | nearest assembly points + occupancy %, evacuation route, one-click SOS (Fire / Collapse / Flood / Medical), "I'm safe", auto-reroute when a point is ≥90% full or a road is closed |
-| Dispatcher | `/dispatcher` | live (SSE) dashboard: SOS per zone, point occupancy, brigades, RED alerts with one-click approve |
+| Citizen (mobile-first PWA) | `/` (alias `/mobile`) | Home: 4 SOS types → 3 s cancellable countdown → "SOS sent" with progress (reached dispatcher → brigade assigned → help on the way) and 60 s "sent by mistake" cancel. Separate route screen: map, nearest safe point, ETA, navigation link, auto-reroute when a point is ≥90% full or a road is closed. "I'm safe" is press-and-hold (1.5 s) + slide-to-confirm so it can't be hit by accident. Offline SOS queue. |
+| Dispatcher | `/dispatcher` | live (SSE) dashboard: RED alerts (most critical first) showing exactly what approval will do (brigade + ETA, reserve point), one-click approve with 10 s undo, latest signals, KPIs, map, point occupancy, brigades |
 
 ```bash
 npm start            # http://localhost:3000   (PORT=… to change)
-npm test             # 32 tests, ~0.5s
+npm test             # 42 tests, ~0.5s
 npm run demo         # fires a SOS cluster + overcrowding + API outage (server must be running)
 npm run load         # load test (start server with SOS_BURST=100000 API_BURST=100000 to disable limits)
 ```
@@ -49,7 +49,8 @@ Routing is a **simulated** external map/traffic API (`RoadGraph` with live closu
 
 ## API (short)
 Public: `GET /api/evacuation?lat&lng` (or `?district=`), `GET /api/points`, `GET /api/roads`, `POST /api/sos`, `POST /api/safe`, `POST /api/points/:id/checkin`, `GET /api/i18n/:lang`
-Dispatcher: `GET /api/dashboard`, `GET /api/stream?token=` (SSE), `POST /api/alerts/:id/approve`, `POST /api/roads/:id/close|open|congestion`, `POST /api/brigades/:id/status`
+Citizen extras: `GET /api/sos/:id` (progress stage 0-3 + ETA), `POST /api/sos/:id/cancel` (owner only, 60 s window)
+Dispatcher: `GET /api/dashboard` (alerts carry `plan`, `typeCounts`, `undoMsLeft`), `POST /api/alerts/:id/undo` (10 s window), `GET /api/stream?token=` (SSE), `POST /api/alerts/:id/approve`, `POST /api/roads/:id/close|open|congestion`, `POST /api/brigades/:id/status`
 Admin: `POST /api/sim/{occupancy,chaos,rules,reset}`
 Add `?lang=az|en|ru` for localized error messages.
 

@@ -1,166 +1,234 @@
 <!doctype html>
 <html lang="az">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Dispatcher</title>
-  <link rel="stylesheet" href="/vendor/leaflet.css">
-  <link rel="stylesheet" href="/style.css">
-  <script src="/vendor/leaflet.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dispetçer</title>
+<link rel="stylesheet" href="/vendor/leaflet.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Plus+Jakarta+Sans:wght@700;800&amp;display=swap">
+<script src="/vendor/leaflet.js"></script>
+<style>
+  :root { --ink:#0b0b0f; --muted:#5f6470; --soft:#f4f5f7; --line:#e4e5ea; --blue:#0071e3; --green:#1a9e55; --green-ink:#0b7a42; --red:#ff3b30; --red-ink:#b4231a;
+          --head:'Plus Jakarta Sans','Inter',system-ui,-apple-system,Segoe UI,Roboto,sans-serif; --body:'Inter',system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--soft); color:var(--ink); font:14px/1.4 var(--body); }
+  button { font:inherit; color:inherit; cursor:pointer; } button:disabled { opacity:.5; cursor:not-allowed; }
+  header { background:#fff; border-bottom:1px solid var(--line); padding:12px 24px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  .logo { font:800 18px var(--head); letter-spacing:-0.04em; } .logo span { color:var(--blue); }
+  .pill { font-size:13px; border-radius:999px; padding:6px 12px; background:var(--soft); color:var(--muted); display:flex; align-items:center; gap:8px; }
+  .pill.ok { background:#e6f6ec; color:var(--green-ink); font-weight:600; } .pill.bad { background:#fdeceb; color:var(--red-ink); font-weight:600; }
+  .live { width:8px; height:8px; border-radius:50%; background:var(--green); }
+  select, input { font:inherit; padding:7px 10px; border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--ink); }
+  .grow { flex-grow:1; }
+  main { display:flex; flex-wrap:wrap; gap:14px; padding:16px 24px; align-items:stretch; }
+  .col { min-width:0; display:flex; flex-direction:column; gap:12px; }
+  .left { flex:1 1 340px; max-width:400px; } .mid { flex:999 1 520px; } .right { flex:1 1 280px; max-width:330px; }
+  .h { display:flex; align-items:center; justify-content:space-between; font:800 16px var(--head); letter-spacing:-0.02em; }
+  .count { background:var(--red); color:#fff; border-radius:999px; padding:1px 9px; font-size:12px; margin-left:6px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:16px; padding:14px; }
+  .lbl { font-size:12px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin-bottom:8px; }
+  .alert { background:#fff; border:2px solid var(--red); border-radius:18px; padding:16px; display:flex; flex-direction:column; gap:10px; cursor:pointer; }
+  .alert.done { border-color:var(--green); }
+  .eyebrow { display:flex; align-items:center; gap:8px; font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--red-ink); } .eyebrow .d { width:10px; height:10px; border-radius:50%; background:var(--red); } .eyebrow time { margin-left:auto; font-weight:400; text-transform:none; letter-spacing:0; color:var(--muted); }
+  .alert.done .eyebrow { color:var(--green-ink); } .alert.done .eyebrow .d { background:var(--green); }
+  .atitle { font:800 18px/1.2 var(--head); letter-spacing:-0.03em; }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; } .chip { border-radius:999px; padding:3px 10px; font-size:12px; font-weight:600; }
+  .plan { background:var(--soft); border-radius:14px; padding:12px 14px; display:flex; flex-direction:column; gap:8px; } .plan div { display:flex; gap:10px; align-items:center; font-size:14px; }
+  .approve { height:52px; border:0; border-radius:14px; background:var(--red); color:#fff; font:700 16px var(--head); }
+  .undo { height:46px; border:1.5px solid var(--line); border-radius:14px; background:#fff; font:700 15px var(--head); }
+  .small { font-size:12px; color:var(--muted); text-align:center; }
+  .feed div { display:flex; gap:10px; align-items:center; padding:6px 0; border-top:1px solid #f0f1f4; font-size:13.5px; } .feed div:first-of-type { border-top:0; } .feed i { width:8px; height:8px; border-radius:50%; flex:none; } .feed span { flex-grow:1; } .feed small { color:var(--muted); }
+  .kpis { display:flex; gap:12px; flex-wrap:wrap; } .kpi { flex:1 1 130px; background:#fff; border:1px solid var(--line); border-radius:16px; padding:12px 16px; } .kpi small { color:var(--muted); font-size:12px; } .kpi div { display:flex; align-items:baseline; gap:8px; } .kpi b { font:800 28px var(--head); letter-spacing:-0.04em; }
+  #mapbox { position:relative; flex-grow:1; min-height:440px; border-radius:18px; overflow:hidden; border:1px solid var(--line); }
+  #map { position:absolute; inset:0; }
+  .legend { position:absolute; left:12px; top:12px; z-index:1000; background:#fff; border-radius:12px; padding:8px 12px; display:flex; gap:14px; font-size:12.5px; box-shadow:0 1px 3px rgba(0,0,0,.12); flex-wrap:wrap; }
+  .bar { height:6px; border-radius:3px; background:var(--soft); margin-top:6px; overflow:hidden; } .bar i { display:block; height:100%; }
+  .prow { margin-bottom:12px; } .prow > div:first-child { display:flex; justify-content:space-between; font-size:13.5px; font-weight:500; }
+  .brow { display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-top:1px solid #f0f1f4; font-size:13.5px; gap:8px; } .brow:first-of-type { border-top:0; }
+  .state { border-radius:999px; padding:2px 10px; font-size:12px; font-weight:600; }
+  .sim { display:flex; gap:6px; flex-wrap:wrap; align-items:center; } .sim button { border:1px solid var(--line); background:#fff; border-radius:10px; padding:6px 10px; font-size:13px; }
+  #login { position:fixed; inset:0; z-index:5000; background:rgba(11,11,15,.55); display:none; align-items:center; justify-content:center; padding:16px; } #login.on { display:flex; }
+  #login form { background:#fff; border-radius:20px; padding:22px; width:340px; display:flex; flex-direction:column; gap:12px; } #login h2 { margin:0; font:800 22px var(--head); letter-spacing:-0.04em; }
+  #login button { height:48px; border:0; border-radius:14px; background:var(--blue); color:#fff; font:700 16px var(--head); }
+  #toast { position:fixed; left:50%; bottom:18px; transform:translate(-50%,120px); background:#0b0b0f; color:#fff; padding:12px 18px; border-radius:12px; transition:.25s; z-index:6000; font-weight:600; } #toast.show { transform:translate(-50%,0); } #toast.err { background:var(--red-ink); }
+</style>
 </head>
 <body>
 <header>
-  <h1 data-i18n="app.title">…</h1>
-  <nav><a href="/" data-i18n="ui.citizen">Vətəndaş</a><a href="/dispatcher" data-i18n="ui.dispatcher">Dispetçer</a><a href="/mobile">📱 Mobile</a></nav>
-  <div class="row">
-    <input id="token" type="password" value="admin-demo" data-i18n-ph="ui.token" style="width:150px">
-    <button id="connect" class="primary" data-i18n="ui.connect">…</button>
-    <select id="lang"><option value="az">AZ</option><option value="en">EN</option><option value="ru">RU</option></select>
-  </div>
+  <div class="logo">Urban Crisis <span>Engine</span></div>
+  <div class="grow"></div>
+  <div class="pill"><span class="live"></span><span id="clock"></span></div>
+  <div class="pill ok" id="apiPill"></div>
+  <select id="lang"><option value="az">AZ</option><option value="en">EN</option><option value="ru">RU</option></select>
 </header>
+
 <main>
-  <section class="panel">
-    <div class="card"><h2 data-i18n="ui.alerts">…</h2><div id="alerts"></div></div>
-    <div class="card"><h2 data-i18n="ui.zones">…</h2><table id="zones"></table>
-      <p class="muted"><span data-i18n="ui.safeCount"></span>: <b id="safeCount">0</b> · <span data-i18n="ui.openSos"></span>: <b id="sosTotal">0</b></p></div>
-    <div class="card"><h2 data-i18n="ui.points">…</h2><div id="points"></div></div>
-    <div class="card"><h2 data-i18n="ui.brigades">…</h2><table id="brigades"></table></div>
-    <div class="card"><h2 data-i18n="ui.sim">…</h2>
-      <div class="row">
-        <select id="simPoint"></select>
-        <input id="simPct" type="number" min="0" max="100" value="96" style="width:70px">%
-        <button id="simSet">Set</button>
-      </div>
-      <div class="row" style="margin-top:8px">
-        <button id="chaosOn">External API ✖</button><button id="chaosOff">External API ✔</button>
-        <button id="roadRandom">🚧 <span data-i18n="ui.closeRoad"></span></button>
-        <button id="reset">Reset</button>
-      </div>
-      <p class="muted" id="simMsg"></p>
-    </div>
+  <section class="col left">
+    <div class="h"><span><span id="tAlerts"></span><span class="count" id="alertCount">0</span></span><span class="small" id="tCritical"></span></div>
+    <div id="alerts" style="display:flex;flex-direction:column;gap:12px"></div>
+    <div class="card"><div class="lbl" id="tFeed"></div><div class="feed" id="feed"></div></div>
   </section>
-  <div id="map"></div>
+
+  <section class="col mid">
+    <div class="kpis" id="kpis"></div>
+    <div id="mapbox"><div id="map"></div><div class="legend" id="legend"></div></div>
+  </section>
+
+  <section class="col right">
+    <div class="card"><div class="lbl" id="tPoints"></div><div id="points"></div></div>
+    <div class="card"><div class="lbl" id="tBrigades"></div><div id="brigades"></div></div>
+    <details class="card"><summary class="lbl" style="cursor:pointer;margin:0">Simulyasiya</summary>
+      <div class="sim" style="margin-top:10px">
+        <select id="simPoint"></select><input id="simPct" type="number" min="0" max="100" value="96" style="width:64px">%<button id="simSet">OK</button>
+      </div>
+      <div class="sim" style="margin-top:8px"><button id="chaosOn">API ✖</button><button id="chaosOff">API ✔</button><button id="roadRandom">Yol bağla</button><button id="reset">Reset</button></div>
+    </details>
+  </section>
 </main>
-<div id="toast" class="toast"></div>
+
+<div id="login"><form id="loginForm"><h2>Dispetçer girişi</h2><input id="token" type="password" placeholder="Token" autocomplete="off"><button type="submit">Daxil ol</button><div class="small" id="loginErr"></div></form></div>
+<div id="toast" role="status" aria-live="polite"></div>
 
 <script type="module">
-import { api, esc, initMap, langSwitcher, loadLang, name, pctColor, toast, tr } from './common.js';
+import { api, esc, loadLang, name, pctColor, state, tr } from './common.js';
 
-let token = localStorage.getItem('dtoken') || document.getElementById('token').value;
-document.getElementById('token').value = token;
-let snap = null; let es = null; let roads = [];
-let map, layers = {};
+const $ = (id) => document.getElementById(id);
+const TONE = { FIRE: ['#fdeceb', '#b4231a'], COLLAPSE: ['#fff1de', '#8f4700'], FLOOD: ['#e6f2fd', '#0a5cc2'], MEDICAL: ['#eaf7ee', '#0b7a42'] };
+let token = localStorage.getItem('dtoken') || '';
+let snap = null; let snapAt = 0; let es = null; let roads = [];
+let map; const L2 = {};
 
 await loadLang(localStorage.getItem('lang') || 'az');
-langSwitcher(document.getElementById('lang'), () => snap && render(snap));
+$('lang').value = state.lang;
+$('lang').addEventListener('change', async () => { await loadLang($('lang').value); statics(); snap && render(); });
 
-map = initMap(document.getElementById('map'));
-if (map) for (const k of ['roads', 'zones', 'points', 'sos', 'brigades']) layers[k] = L.layerGroup().addTo(map);
+function toast(msg, err = false) { const el = $('toast'); el.textContent = msg; el.className = `show ${err ? 'err' : ''}`; clearTimeout(toast.t); toast.t = setTimeout(() => { el.className = ''; }, 3200); }
+const act = async (fn) => { try { await fn(); } catch (e) { toast(e.message, true); } };
 
-document.getElementById('connect').addEventListener('click', () => {
-  token = document.getElementById('token').value;
-  localStorage.setItem('dtoken', token);
-  connect();
-});
+function statics() {
+  $('tAlerts').textContent = tr('d.alerts'); $('tCritical').textContent = tr('d.criticalFirst'); $('tFeed').textContent = tr('d.lastSignals');
+  $('tPoints').textContent = tr('d.pointsTitle'); $('tBrigades').textContent = tr('d.brigadesTitle');
+  $('legend').innerHTML = [['#ff3b30', 'd.legendSos', '●'], ['#1a9e55', 'd.legendOpen', '●'], ['#ff9f0a', 'd.legendFilling', '●'], ['#e5352b', 'd.legendClosed', '┄'], ['#0071e3', 'd.legendBrigade', '■']]
+    .map(([c, k, m]) => `<span><span style="color:${c}">${m}</span> ${esc(tr(k))}</span>`).join('');
+}
+statics();
+
+// ---------------------------------------------------------------- login + stream
+function showLogin(msg = '') { $('login').classList.add('on'); $('loginErr').textContent = msg; $('token').value = token || 'admin-demo'; $('token').focus(); }
+$('loginForm').addEventListener('submit', (e) => { e.preventDefault(); token = $('token').value.trim(); localStorage.setItem('dtoken', token); connect(); });
 
 async function connect() {
   es?.close();
-  try { await api('GET', '/api/dashboard', { token }); } catch (e) { toast(e.message, 'err'); return; }
-  roads = await api('GET', '/api/roads');
+  try { snap = await api('GET', '/api/dashboard', { token }); } catch (e) { showLogin(e.status === 401 || e.status === 403 ? e.message : ''); return; }
+  $('login').classList.remove('on');
+  snapAt = Date.now(); roads = await api('GET', '/api/roads').catch(() => roads); render();
   es = new EventSource(`/api/stream?token=${encodeURIComponent(token)}`);
-  es.addEventListener('snapshot', async (ev) => { snap = JSON.parse(ev.data); roads = await api('GET', '/api/roads').catch(() => roads); render(snap); });
-  es.onerror = () => toast('Live feed reconnecting…', 'err'); // EventSource auto-reconnects
+  es.addEventListener('snapshot', async (ev) => { snap = JSON.parse(ev.data); snapAt = Date.now(); roads = await api('GET', '/api/roads').catch(() => roads); render(); });
+  es.onerror = () => { /* EventSource reconnects by itself */ };
+}
+setInterval(() => { $('clock').textContent = `${tr('d.live')} · ${new Date().toLocaleTimeString(state.lang)}`; }, 1000);
+
+// ---------------------------------------------------------------- render
+const zoneName = (id) => name(snap.zones.find((z) => z.id === id)?.name) ?? '';
+const ago = (t) => { const m = Math.max(0, Math.round((Date.now() - t) / 60000)); return m < 1 ? tr('m.now') : `${m} ${tr('d.min')}`; };
+
+function render() {
+  if (!snap) return;
+  const apiDown = snap.chaos.externalDown;
+  $('apiPill').className = `pill ${apiDown ? 'bad' : 'ok'}`; $('apiPill').textContent = apiDown ? tr('d.apiDown') : tr('d.apiOk');
+  renderAlerts(); renderFeed(); renderKpis(); renderSide(); drawMap();
 }
 
-async function act(fn) { try { await fn(); } catch (e) { toast(e.message, 'err'); } }
-
-function render(s) {
-  document.getElementById('safeCount').textContent = s.safeCount;
-  document.getElementById('sosTotal').textContent = s.sosTotalOpen;
-
-  // alerts
-  const alerts = s.alerts;
-  document.getElementById('alerts').innerHTML = alerts.length ? alerts.map((a) => {
-    const zone = s.zones.find((z) => z.id === a.districtId);
-    const done = a.status !== 'open';
-    return `<div class="alert-red ${done ? 'done' : ''}">
-      <strong>${done ? '✅' : '🚨'} ${esc(tr('alert.' + a.type))}</strong> — ${esc(name(zone?.name) ?? '')}<br>
-      ${done ? '' : `<b>${esc(tr('alert.RED_DISPATCH_AND_OPEN_POINT'))}</b><br>`}
-      <span class="muted">${a.type === 'SOS_CLUSTER' ? `${a.reporters} ${esc(tr('ui.reporters'))}` : `${a.occupancyPct}%`} · ${new Date(a.createdAt).toLocaleTimeString()}</span>
-      ${a.status === 'open' ? `<div style="margin-top:8px"><button class="danger" data-approve="${a.id}">${esc(tr('ui.approve'))}</button></div>`
-        : a.status === 'approved' ? `<div class="muted">${esc(tr('ui.approved'))}: ${esc(a.result.brigadeId ?? '—')} → ${esc(a.result.openedPointId ?? '—')}</div>` : ''}
-    </div>`;
-  }).join('') : `<p class="muted">${esc(tr('ui.noAlerts'))}</p>`;
-  document.querySelectorAll('[data-approve]').forEach((b) => b.addEventListener('click', () => act(async () => {
-    b.disabled = true;
-    await api('POST', `/api/alerts/${b.dataset.approve}/approve`, { token });
-  })));
-
-  document.getElementById('zones').innerHTML = s.zones.map((z) =>
-    `<tr><td>${esc(name(z.name))}</td><td><b style="color:${z.openSos ? '#dc2626' : 'inherit'}">${z.openSos}</b></td></tr>`).join('');
-
-  document.getElementById('points').innerHTML = s.points.map((p) => `
-    <div style="margin-bottom:6px;${p.active ? '' : 'opacity:.5'}">
-      <div class="row" style="justify-content:space-between"><span>${esc(name(p.name))}${p.active ? '' : ' 🔒'}</span><b style="color:${pctColor(p.occupancyPct)}">${p.occupancyPct}%</b></div>
-      <div class="bar"><i style="width:${Math.min(100, p.occupancyPct)}%;background:${pctColor(p.occupancyPct)}"></i></div></div>`).join('');
-
-  document.getElementById('brigades').innerHTML = s.brigades.map((b) =>
-    `<tr><td>${esc(b.name)}</td><td>${esc(tr('brigade.' + b.status))}</td>
-     <td>${b.status !== 'available' ? `<button data-free="${b.id}">✓</button>` : ''}</td></tr>`).join('');
-  document.querySelectorAll('[data-free]').forEach((b) => b.addEventListener('click', () =>
-    act(() => api('POST', `/api/brigades/${b.dataset.free}/status`, { token, body: { status: 'available' } }))));
-
-  const simSel = document.getElementById('simPoint');
-  if (!simSel.options.length) simSel.innerHTML = s.points.filter((p) => p.active).map((p) => `<option value="${p.id}">${esc(name(p.name))}</option>`).join('');
-
-  drawMap(s);
+function alertCard(a) {
+  const done = a.status === 'approved';
+  const where = zoneName(a.districtId);
+  const title = a.type === 'SOS_CLUSTER'
+    ? `${a.reporters} ${tr('d.reporters')} · ${tr('d.radius')}`
+    : `${name(snap.points.find((p) => p.id === a.pointId)?.name)} · ${a.occupancyPct}% · ${tr('d.exceeded')}`;
+  const chips = Object.entries(a.typeCounts ?? {}).map(([t, n]) => `<span class="chip" style="background:${TONE[t][0]};color:${TONE[t][1]}">${esc(tr('sos.' + t))} ×${n}</span>`).join('');
+  const brig = a.plan?.brigade; const pt = a.plan?.point;
+  const planHtml = done
+    ? `<div class="plan"><div>✓ <span><b>${esc(a.result.brigadeId ?? '—')}</b>${a.result.etaMin ? ` · ~${a.result.etaMin} ${esc(tr('d.min'))}` : ''}</span></div><div>✓ <span><b>${esc(name(snap.points.find((p) => p.id === a.result.openedPointId)?.name) ?? '—')}</b></span></div></div>`
+    : `<div class="plan"><div class="lbl" style="margin:0">${esc(tr('d.after'))}</div>
+        <div>${brig ? `<span style="color:#0071e3">▸</span><span><b>${esc(brig.name)}</b> ${esc(tr('d.sendsBrigade'))} ~${brig.etaMin} ${esc(tr('d.min'))}</span>` : `<span>⚠</span><span>${esc(tr('d.noBrigade'))}</span>`}</div>
+        <div>${pt ? `<span style="color:#1a9e55">▸</span><span><b>${esc(name(pt.name))}</b> ${esc(tr('d.opensPoint'))} ${pt.capacity}</span>` : `<span>⚠</span><span>${esc(tr('d.noReserve'))}</span>`}</div></div>`;
+  const left = done ? Math.max(0, a.undoMsLeft - (Date.now() - snapAt)) : 0;
+  const actions = done
+    ? (left > 0 ? `<button class="undo" data-undo="${a.id}">${esc(tr('d.undo'))} (${Math.ceil(left / 1000)} s)</button>` : `<div class="small">${esc(tr('d.approvedAs'))}</div>`)
+    : `<button class="approve" data-approve="${a.id}">${esc(tr('d.approve'))}</button><div class="small">${esc(tr('d.undoHint'))}</div>`;
+  return `<article class="alert ${done ? 'done' : ''}" data-focus="${a.center.lat},${a.center.lng}">
+    <div class="eyebrow"><span class="d"></span>${esc(tr('d.redAlerts'))} · ${esc(where)}<time>${esc(ago(a.createdAt))}</time></div>
+    <div class="atitle">${esc(tr('alert.RED_DISPATCH_AND_OPEN_POINT'))}</div>
+    <div style="font-size:13.5px;color:var(--muted)">${esc(title)}</div>
+    ${chips ? `<div class="chips">${chips}</div>` : ''}${planHtml}${actions}</article>`;
 }
 
-function drawMap(s) {
-  if (!map) return;
-  Object.values(layers).forEach((l) => l.clearLayers());
-  for (const r of roads) {
-    if (r.closed) {
-      L.polyline([[r.from.lat, r.from.lng], [r.to.lat, r.to.lng]], { color: '#dc2626', weight: 4, dashArray: '6 6' })
-        .on('click', () => act(() => api('POST', `/api/roads/${r.id}/open`, { token }).then(refreshRoads))).addTo(layers.roads);
-    }
+function renderAlerts() {
+  const list = snap.alerts.filter((a) => a.status !== 'expired').sort((x, y) => (x.status === 'open' ? 0 : 1) - (y.status === 'open' ? 0 : 1) || (y.reporters ?? y.occupancyPct) - (x.reporters ?? x.occupancyPct));
+  const open = list.filter((a) => a.status === 'open').length;
+  $('alertCount').textContent = open; $('alertCount').style.display = open ? '' : 'none';
+  $('alerts').innerHTML = list.length ? list.map(alertCard).join('') : `<div class="card small">${esc(tr('ui.noAlerts'))}</div>`;
+  $('alerts').querySelectorAll('[data-approve]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); act(async () => { b.disabled = true; await api('POST', `/api/alerts/${b.dataset.approve}/approve`, { token }); }); }));
+  $('alerts').querySelectorAll('[data-undo]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); act(async () => { b.disabled = true; await api('POST', `/api/alerts/${b.dataset.undo}/undo`, { token }); }); }));
+  $('alerts').querySelectorAll('[data-focus]').forEach((c) => c.addEventListener('click', () => { const [la, ln] = c.dataset.focus.split(',').map(Number); map?.flyTo([la, ln], 15); }));
+}
+setInterval(() => { if (snap?.alerts.some((a) => a.status === 'approved' && a.undoMsLeft - (Date.now() - snapAt) > -1000)) renderAlerts(); }, 500);
+
+function renderFeed() {
+  const items = [...snap.sos].reverse().slice(0, 6);
+  $('feed').innerHTML = items.length ? items.map((s) => `<div><i style="background:#ff3b30"></i><span>${esc(tr('sos.' + s.type))} · ${esc(zoneName(s.districtId))}${s.note ? ' · ' + esc(s.note) : ''}</span><small>${new Date(s.createdAt).toLocaleTimeString(state.lang, { hour: '2-digit', minute: '2-digit' })}</small></div>`).join('')
+    : `<div class="small">${esc(tr('d.noSignals'))}</div>`;
+}
+
+function renderKpis() {
+  const reds = snap.alerts.filter((a) => a.status === 'open').length;
+  const free = snap.brigades.filter((b) => b.status === 'available').length;
+  const k = [[tr('d.openSos'), snap.sosTotalOpen, '#b4231a'], [tr('d.redAlerts'), reds, '#b4231a'], [tr('d.safe'), snap.safeCount, '#0b7a42'], [tr('d.freeBrigades'), `${free}/${snap.brigades.length}`, '#0b0b0f']];
+  $('kpis').innerHTML = k.map(([l, v, c]) => `<div class="kpi"><small>${esc(l)}</small><div><b style="color:${c}">${v}</b></div></div>`).join('');
+}
+
+function renderSide() {
+  $('points').innerHTML = snap.points.filter((p) => p.active).sort((a, b) => b.occupancyPct - a.occupancyPct).map((p) =>
+    `<div class="prow"><div><span>${esc(name(p.name))}</span><b style="color:${pctColor(p.occupancyPct)}">${p.occupancyPct}%</b></div><div class="bar"><i style="width:${Math.min(100, p.occupancyPct)}%;background:${pctColor(p.occupancyPct)}"></i></div></div>`).join('');
+  const bs = { available: ['#e6f6ec', '#0b7a42'], dispatched: ['#e6f2fd', '#0a5cc2'], on_scene: ['#e6f2fd', '#0a5cc2'], offline: ['#f4f5f7', '#5f6470'] };
+  $('brigades').innerHTML = snap.brigades.map((b) => `<div class="brow"><span>${esc(b.name)}</span><span style="display:flex;gap:6px;align-items:center"><span class="state" style="background:${bs[b.status][0]};color:${bs[b.status][1]}">${esc(tr('brigade.' + b.status))}</span>${b.status !== 'available' ? `<button data-free="${b.id}" title="${esc(tr('d.freeUp'))}" style="border:1px solid var(--line);background:#fff;border-radius:8px;padding:2px 8px">✓</button>` : ''}</span></div>`).join('');
+  $('brigades').querySelectorAll('[data-free]').forEach((b) => b.addEventListener('click', () => act(() => api('POST', `/api/brigades/${b.dataset.free}/status`, { token, body: { status: 'available' } }))));
+  const sel = $('simPoint'); if (!sel.options.length) sel.innerHTML = snap.points.filter((p) => p.active).map((p) => `<option value="${p.id}">${esc(name(p.name))}</option>`).join('');
+}
+
+// ---------------------------------------------------------------- map
+function ensureMap() {
+  if (map || typeof L === 'undefined') return;
+  map = L.map('map', { zoomControl: true }).setView([40.41, 49.87], 12);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap' }).addTo(map);
+  for (const k of ['roads', 'zones', 'points', 'sos', 'brigades']) L2[k] = L.layerGroup().addTo(map);
+}
+function drawMap() {
+  ensureMap(); if (!map) return;
+  Object.values(L2).forEach((l) => l.clearLayers());
+  for (const r of roads) if (r.closed) L.polyline([[r.from.lat, r.from.lng], [r.to.lat, r.to.lng]], { color: '#e5352b', weight: 5, dashArray: '9 8' }).on('click', () => act(async () => { await api('POST', `/api/roads/${r.id}/open`, { token }); })).addTo(L2.roads);
+  for (const z of snap.zones) L.circle([z.lat, z.lng], { radius: 500, color: z.openSos ? '#ff3b30' : '#94a3b8', weight: z.openSos ? 2 : 1, fillOpacity: z.openSos ? 0.12 : 0.03 }).bindTooltip(`${name(z.name)}: ${z.openSos} SOS`).addTo(L2.zones);
+  for (const p of snap.points) L.circleMarker([p.lat, p.lng], { radius: p.active ? 12 : 6, color: '#fff', weight: 3, fillColor: p.active ? pctColor(p.occupancyPct) : '#9ca3af', fillOpacity: 1 }).bindTooltip(`${name(p.name)} ${p.occupancyPct}%`).addTo(L2.points);
+  for (const s of snap.sos) L.circleMarker([s.lat, s.lng], { radius: 6, color: '#fff', weight: 2, fillColor: '#ff3b30', fillOpacity: 1 }).bindTooltip(`${tr('sos.' + s.type)}${s.note ? ': ' + s.note : ''}`).addTo(L2.sos);
+  for (const b of snap.brigades) {
+    L.marker([b.lat, b.lng], { icon: L.divIcon({ className: '', iconSize: [22, 22], html: `<div style="width:22px;height:22px;border-radius:6px;background:#0071e3;border:3px solid #fff;opacity:${b.status === 'available' ? 1 : .6}"></div>` }) }).bindTooltip(`${b.name} · ${tr('brigade.' + b.status)}`).addTo(L2.brigades);
+    if (b.target) L.polyline([[b.lat, b.lng], [b.target.lat, b.target.lng]], { color: '#0071e3', dashArray: '3 8', weight: 4 }).addTo(L2.brigades);
   }
-  for (const z of s.zones) {
-    L.circle([z.lat, z.lng], { radius: 500, color: z.openSos ? '#dc2626' : '#94a3b8', weight: 1, fillOpacity: z.openSos ? .15 : .03 })
-      .bindTooltip(`${name(z.name)}: ${z.openSos} SOS`).addTo(layers.zones);
-  }
-  for (const p of s.points) {
-    L.circleMarker([p.lat, p.lng], { radius: p.active ? 11 : 6, color: p.active ? pctColor(p.occupancyPct) : '#9ca3af', fillOpacity: .8 })
-      .bindTooltip(`${name(p.name)} ${p.occupancyPct}%`).addTo(layers.points);
-  }
-  for (const o of s.sos) L.circleMarker([o.lat, o.lng], { radius: 4, color: '#dc2626', fillOpacity: 1 }).bindTooltip(`${tr('sos.' + o.type)}${o.note ? ': ' + o.note : ''}`).addTo(layers.sos);
-  for (const b of s.brigades) {
-    L.marker([b.lat, b.lng], { icon: L.divIcon({ html: b.kind === 'fire' ? '🚒' : b.kind === 'medical' ? '🚑' : '🛟', className: '', iconSize: [24, 24] }), opacity: b.status === 'available' ? 1 : .6 })
-      .bindTooltip(`${b.name} – ${tr('brigade.' + b.status)}`).addTo(layers.brigades);
-    if (b.target) L.polyline([[b.lat, b.lng], [b.target.lat, b.target.lng]], { color: '#2563eb', dashArray: '4 6' }).addTo(layers.brigades);
+  for (const a of snap.alerts.filter((x) => x.status === 'open' && x.plan?.brigade)) {
+    const b = snap.brigades.find((x) => x.id === a.plan.brigade.id);
+    if (b) L.polyline([[b.lat, b.lng], [a.center.lat, a.center.lng]], { color: '#0071e3', dashArray: '3 8', weight: 3, opacity: .6 }).addTo(L2.brigades);
   }
 }
 
-async function refreshRoads() { roads = await api('GET', '/api/roads'); snap && drawMap(snap); }
+// ---------------------------------------------------------------- simulation (admin token)
+const sim = (fn) => () => act(fn);
+$('simSet').addEventListener('click', sim(async () => { const pt = snap.points.find((p) => p.id === $('simPoint').value); await api('POST', '/api/sim/occupancy', { token, body: { pointId: pt.id, occupied: Math.round((Number($('simPct').value) / 100) * pt.capacity) } }); }));
+$('chaosOn').addEventListener('click', sim(() => api('POST', '/api/sim/chaos', { token, body: { externalDown: true } })));
+$('chaosOff').addEventListener('click', sim(() => api('POST', '/api/sim/chaos', { token, body: { externalDown: false } })));
+$('roadRandom').addEventListener('click', sim(async () => { const open = roads.filter((r) => !r.closed); const r = open[Math.floor(Math.random() * open.length)]; await api('POST', `/api/roads/${r.id}/close`, { token }); }));
+$('reset').addEventListener('click', sim(() => api('POST', '/api/sim/reset', { token })));
 
-// --- simulation controls (admin token needed) ---
-const sim = (fn) => () => act(async () => { await fn(); document.getElementById('simMsg').textContent = 'OK'; });
-document.getElementById('simSet').addEventListener('click', sim(async () => {
-  const id = document.getElementById('simPoint').value;
-  const pt = snap.points.find((p) => p.id === id);
-  const pct = Number(document.getElementById('simPct').value);
-  await api('POST', '/api/sim/occupancy', { token, body: { pointId: id, occupied: Math.round((pct / 100) * pt.capacity) } });
-}));
-document.getElementById('chaosOn').addEventListener('click', sim(() => api('POST', '/api/sim/chaos', { token, body: { externalDown: true } })));
-document.getElementById('chaosOff').addEventListener('click', sim(() => api('POST', '/api/sim/chaos', { token, body: { externalDown: false } })));
-document.getElementById('roadRandom').addEventListener('click', sim(async () => {
-  const open = roads.filter((r) => !r.closed);
-  const r = open[Math.floor(Math.random() * open.length)];
-  await api('POST', `/api/roads/${r.id}/close`, { token }); await refreshRoads();
-}));
-document.getElementById('reset').addEventListener('click', sim(async () => { await api('POST', '/api/sim/reset', { token }); await refreshRoads(); }));
-
-connect();
+if (token) connect(); else showLogin();
 </script>
 </body>
 </html>

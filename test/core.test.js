@@ -107,7 +107,7 @@ test('approve: works even when no brigade/reserve left (result nulls, no crash)'
   for (const p of app.store.points.values()) p.active = true;
   ['c1', 'c2', 'c3', 'c4'].forEach((c) => sos(app, c));
   const res = app.crisis.approve(app.store.alerts[0].id);
-  assert.deepEqual(res.result, { brigadeId: null, openedPointId: null });
+  assert.deepEqual(res.result, { brigadeId: null, openedPointId: null, etaMin: null });
 });
 
 test('marking safe resolves the citizen SOS', () => {
@@ -193,4 +193,88 @@ test('rate limiter refills over time', () => {
   t += 1000;
   assert.ok(rl.take('a'));
   assert.ok(rl.take('b'), 'separate key');
+});
+
+// ---- Redesign features: plan preview, undo, SOS cancel/status ---------------
+test('plan: previews brigade + reserve point + ETA without changing state', () => {
+  const app = setup();
+  ['c1', 'c2', 'c3', 'c4'].forEach((c) => sos(app, c));
+  const alert = app.store.alerts[0];
+  const plan = app.crisis.plan(alert);
+  assert.ok(plan.brigade.id && plan.brigade.etaMin >= 1);
+  assert.ok(plan.point.id && plan.point.capacity > 0);
+  assert.equal(app.store.brigades.get(plan.brigade.id).status, 'available');
+  assert.equal(app.store.points.get(plan.point.id).active, false);
+  const res = app.crisis.approve(alert.id);
+  assert.equal(res.result.brigadeId, plan.brigade.id, 'approve does exactly what plan promised');
+  assert.equal(res.result.openedPointId, plan.point.id);
+  assert.equal(res.result.etaMin, plan.brigade.etaMin);
+});
+
+test('undo: inside 10s restores brigade + closes point + reopens alert; after 10s refused', () => {
+  const app = setup();
+  ['c1', 'c2', 'c3', 'c4'].forEach((c) => sos(app, c));
+  const alert = app.store.alerts[0];
+  const { result } = app.crisis.approve(alert.id);
+  app.clock.t += 5_000;
+  app.crisis.undo(alert.id);
+  assert.equal(alert.status, 'open');
+  assert.equal(app.store.brigades.get(result.brigadeId).status, 'available');
+  assert.equal(app.store.points.get(result.openedPointId).active, false);
+  app.crisis.approve(alert.id);
+  app.clock.t += 11_000;
+  assert.throws(() => app.crisis.undo(alert.id), { code: 'UNDO_EXPIRED' });
+  assert.throws(() => app.crisis.undo('nope'), { code: 'ALERT_NOT_FOUND' });
+});
+
+test('undo: not allowed for an alert that was never approved', () => {
+  const app = setup();
+  ['c1', 'c2', 'c3', 'c4'].forEach((c) => sos(app, c));
+  assert.throws(() => app.crisis.undo(app.store.alerts[0].id), { code: 'ALERT_NOT_APPROVED' });
+});
+
+test('decorate: dashboard alerts carry plan, SOS type counts and undo timer', () => {
+  const app = setup();
+  sos(app, 'c1', NASIMI, 'FIRE'); sos(app, 'c2', NASIMI, 'FIRE'); sos(app, 'c3', NASIMI, 'MEDICAL'); sos(app, 'c4', NASIMI, 'COLLAPSE');
+  let a = app.crisis.decorate(app.store.snapshot()).alerts[0];
+  assert.deepEqual(a.typeCounts, { FIRE: 2, MEDICAL: 1, COLLAPSE: 1 });
+  assert.ok(a.plan.brigade);
+  app.crisis.approve(a.id);
+  app.clock.t += 3_000;
+  a = app.crisis.decorate(app.store.snapshot()).alerts[0];
+  assert.equal(a.undoMsLeft, 7_000);
+});
+
+test('cancelSos: owner can cancel within window; others and late attempts cannot', () => {
+  const app = setup();
+  const s = sos(app, 'owner');
+  assert.throws(() => app.store.cancelSos(s.id, 'someone-else'), { code: 'FORBIDDEN' });
+  assert.equal(app.store.cancelSos(s.id, 'owner').status, 'cancelled');
+  assert.equal(app.store.zoneCounts().nasimi, 0, 'cancelled SOS no longer counts');
+  assert.throws(() => app.store.cancelSos(s.id, 'owner'), { code: 'SOS_NOT_OPEN' });
+  const late = sos(app, 'owner2');
+  app.clock.t += 61_000;
+  assert.throws(() => app.store.cancelSos(late.id, 'owner2'), { code: 'CANCEL_EXPIRED' });
+  assert.throws(() => app.store.cancelSos('s9999', 'x'), { code: 'SOS_NOT_FOUND' });
+});
+
+test('cancelled SOS do not contribute to a cluster alert', () => {
+  const app = setup();
+  const a = sos(app, 'c1'); sos(app, 'c2'); sos(app, 'c3');
+  app.store.cancelSos(a.id, 'c1');
+  sos(app, 'c4');
+  assert.equal(app.store.alerts.length, 0, 'only 3 live reporters');
+});
+
+test('sosStatus: stage 2 while assigning, stage 3 with ETA after approval, 0 when cancelled', () => {
+  const app = setup();
+  const mine = sos(app, 'c1'); ['c2', 'c3', 'c4'].forEach((c) => sos(app, c));
+  assert.equal(app.store.sosStatus(mine.id).stage, 2);
+  app.crisis.approve(app.store.alerts[0].id);
+  const st = app.store.sosStatus(mine.id);
+  assert.equal(st.stage, 3);
+  assert.ok(st.etaMin >= 1);
+  const other = sos(app, 'z', { lat: 40.46, lng: 49.82 });
+  app.store.cancelSos(other.id, 'z');
+  assert.equal(app.store.sosStatus(other.id).stage, 0);
 });

@@ -9,9 +9,10 @@ const pct = (p) => (p.capacity > 0 ? (p.occupied / p.capacity) * 100 : 100);
 
 /** In-memory state of the city. Emits 'change' on any mutation, 'alert' on new alerts. */
 export class Store extends EventEmitter {
-  constructor(seed, { now = () => Date.now() } = {}) {
+  constructor(seed, { now = () => Date.now(), cancelWindowMs = 60_000 } = {}) {
     super();
     this.now = now;
+    this.cancelWindowMs = cancelWindowMs;
     this.seed = seed;
     this.reset();
   }
@@ -78,6 +79,34 @@ export class Store extends EventEmitter {
     this.safe.delete(sos.citizenId);
     this.emit('change', 'sos', sos);
     return sos;
+  }
+
+  findSos(id) {
+    for (let i = this.sos.length - 1; i >= 0; i--) if (this.sos[i].id === id) return this.sos[i];
+    throw new AppError(404, 'SOS_NOT_FOUND');
+  }
+
+  /** Citizen retracts their own SOS shortly after sending ("I sent it by mistake"). */
+  cancelSos(id, citizenId) {
+    const s = this.findSos(id);
+    if (typeof citizenId !== 'string' || s.citizenId !== citizenId.trim()) throw new AppError(403, 'FORBIDDEN');
+    if (s.status !== 'open') throw new AppError(409, 'SOS_NOT_OPEN');
+    if (this.now() - s.createdAt > this.cancelWindowMs) throw new AppError(409, 'CANCEL_EXPIRED');
+    s.status = 'cancelled';
+    this.emit('change', 'sos-cancel');
+    return { id: s.id, status: s.status };
+  }
+
+  /** Progress shown to the citizen: stage 1 received, 2 assigning, 3 help on the way. */
+  sosStatus(id) {
+    const s = this.findSos(id);
+    const dispatched = this.alerts.find((a) => a.status === 'approved' && a.sosIds?.includes(id));
+    const stage = s.status === 'cancelled' ? 0 : dispatched ? 3 : 2;
+    return {
+      id: s.id, type: s.type, status: s.status, createdAt: s.createdAt, stage,
+      etaMin: dispatched?.result?.etaMin ?? null,
+      cancelMsLeft: s.status === 'open' ? Math.max(0, s.createdAt + this.cancelWindowMs - this.now()) : 0,
+    };
   }
 
   markSafe(citizenId, pos) {

@@ -31,12 +31,14 @@ export function createApp({
   rules = {},
   limits = {},
   routingTimeoutMs = 700,
+  cancelWindowMs,
 } = {}) {
-  const store = new Store(data, { now });
+  const store = new Store(data, { now, cancelWindowMs });
   const graph = new RoadGraph([...data.districts, ...data.points]);
   const routing = new RoutingService(graph, store.chaos, { timeoutMs: routingTimeoutMs });
   const evacuation = new EvacuationService(store, routing);
   const crisis = new CrisisEngine(store, rules);
+  const snapshot = () => crisis.decorate(store.snapshot());
 
   // Re-evaluate crisis rules whenever SOS or occupancy change (cheap: windows are small).
   store.on('change', (kind, payload) => {
@@ -53,7 +55,7 @@ export function createApp({
   const broadcast = () => {
     pending = null;
     if (!clients.size) return;
-    const payload = `event: snapshot\ndata: ${JSON.stringify(store.snapshot())}\n\n`;
+    const payload = `event: snapshot\ndata: ${JSON.stringify(snapshot())}\n\n`;
     for (const res of clients) res.write(payload);
   };
   store.on('change', () => { if (!pending) pending = setTimeout(broadcast, 150); }); // coalesce bursts
@@ -86,6 +88,9 @@ export function createApp({
     return { status: 201, body: { id: sos.id, status: sos.status, createdAt: sos.createdAt, districtId: sos.districtId } };
   });
 
+  route('GET', '/api/sos/:id', (c) => store.sosStatus(c.params.id));
+  route('POST', '/api/sos/:id/cancel', (c) => store.cancelSos(c.params.id, c.body.citizenId));
+
   route('POST', '/api/safe', (c) => {
     const lat = c.body.lat; const lng = c.body.lng;
     return store.markSafe(c.body.citizenId, typeof lat === 'number' ? { lat, lng } : null);
@@ -94,8 +99,9 @@ export function createApp({
   route('POST', '/api/points/:id/checkin', (c) => store.checkin(c.body.citizenId, c.params.id));
 
   // dispatcher / admin
-  route('GET', '/api/dashboard', { perm: 'dashboard' }, () => store.snapshot());
+  route('GET', '/api/dashboard', { perm: 'dashboard' }, () => snapshot());
   route('POST', '/api/alerts/:id/approve', { perm: 'alert:approve' }, (c) => crisis.approve(c.params.id, c.role));
+  route('POST', '/api/alerts/:id/undo', { perm: 'alert:approve' }, (c) => crisis.undo(c.params.id));
   route('POST', '/api/roads/:id/close', { perm: 'road:write' }, (c) => setRoad(c.params.id, true));
   route('POST', '/api/roads/:id/open', { perm: 'road:write' }, (c) => setRoad(c.params.id, false));
   route('POST', '/api/roads/:id/congestion', { perm: 'road:write' }, (c) => {
@@ -154,7 +160,7 @@ export function createApp({
   });
 
   async function serveStatic(req, res, pathname) {
-    const rel = pathname === '/' ? 'index.html' : pathname === '/dispatcher' ? 'dispatcher.html' : pathname === '/mobile' ? 'mobile.html' : pathname.slice(1);
+    const rel = pathname === '/' || pathname === '/mobile' ? 'mobile.html' : pathname === '/dispatcher' ? 'dispatcher.html' : pathname.slice(1);
     const full = normalize(join(PUBLIC_DIR, rel));
     if (!full.startsWith(PUBLIC_DIR)) return send(res, 404, { error: 'NOT_FOUND' });
     try {
@@ -195,7 +201,7 @@ export function createApp({
         if (!auth.can(role, 'dashboard')) throw new AppError(403, 'FORBIDDEN');
         if (clients.size >= 500) throw new AppError(429, 'RATE_LIMITED');
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
-        res.write(`event: snapshot\ndata: ${JSON.stringify(store.snapshot())}\n\n`);
+        res.write(`event: snapshot\ndata: ${JSON.stringify(snapshot())}\n\n`);
         clients.add(res);
         req.on('close', () => clients.delete(res));
         return undefined;

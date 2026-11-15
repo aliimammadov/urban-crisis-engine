@@ -1,6 +1,6 @@
 // Offline shell for /mobile. API calls are never cached (stale evacuation data is dangerous);
 // the page queues SOS in localStorage and flushes when the network returns.
-const CACHE = 'ucs-shell-v2';
+const CACHE = 'ucs-shell-v3';
 const SHELL = ['/mobile', '/common.js', '/icon.svg', '/manifest.webmanifest', '/vendor/leaflet.js', '/vendor/leaflet.css'];
 
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())); });

@@ -146,3 +146,31 @@ test('mobile PWA assets are served with correct types', async () => {
   assert.equal((await fetch(`${base}/sw.js`)).status, 200);
   assert.equal((await fetch(`${base}/icon.svg`)).status, 200);
 });
+
+test('API: sos status, cancel, plan on dashboard, approve then undo', async () => {
+  await call('POST', '/api/sim/reset', { token: 'admin-demo' });
+  const mine = await call('POST', '/api/sos', { body: { citizenId: 'me', type: 'FIRE', lat: 40.4093, lng: 49.833 } });
+  const st = await call('GET', `/api/sos/${mine.json.id}`);
+  assert.equal(st.json.stage, 2);
+  assert.equal((await call('POST', `/api/sos/${mine.json.id}/cancel`, { body: { citizenId: 'intruder' } })).status, 403);
+  for (const id of ['b', 'c', 'd']) await call('POST', '/api/sos', { body: { citizenId: id, type: 'MEDICAL', lat: 40.4095, lng: 49.833 } });
+  const dash = await call('GET', '/api/dashboard', { token: 'dispatcher-demo' });
+  const alert = dash.json.alerts.find((a) => a.status === 'open');
+  assert.ok(alert.plan.brigade && alert.plan.point);
+  assert.deepEqual(Object.keys(alert.typeCounts).sort(), ['FIRE', 'MEDICAL']);
+  assert.equal((await call('POST', `/api/alerts/${alert.id}/approve`, { token: 'dispatcher-demo' })).status, 200);
+  assert.equal((await call('GET', `/api/sos/${mine.json.id}`)).json.stage, 3);
+  assert.equal((await call('POST', `/api/alerts/${alert.id}/undo`, { token: 'observer-demo' })).status, 403);
+  const undone = await call('POST', `/api/alerts/${alert.id}/undo`, { token: 'dispatcher-demo' });
+  assert.equal(undone.json.status, 'open');
+  assert.equal((await call('GET', `/api/sos/${mine.json.id}`)).json.stage, 2);
+  const cancelled = await call('POST', `/api/sos/${mine.json.id}/cancel`, { body: { citizenId: 'me' } });
+  assert.equal(cancelled.json.status, 'cancelled');
+});
+
+test('"/" serves the citizen app and "/dispatcher" the panel', async () => {
+  const home = await (await fetch(`${base}/`)).text();
+  assert.match(home, /id="app"/);
+  const disp = await (await fetch(`${base}/dispatcher`)).text();
+  assert.match(disp, /id="alerts"/);
+});
