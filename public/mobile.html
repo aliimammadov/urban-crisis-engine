@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="az">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#b91c1c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg">
+  <link rel="apple-touch-icon" href="/icon.svg">
+  <title>SOS</title>
+  <link rel="stylesheet" href="/vendor/leaflet.css">
+  <script src="/vendor/leaflet.js"></script>
+  <style>
+    :root { --bg:#0b1220; --card:#162033; --ink:#f8fafc; --muted:#94a3b8; --red:#ef4444; --green:#22c55e; --amber:#f59e0b; --blue:#3b82f6; }
+    * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    html,body { margin:0; height:100%; background:var(--bg); color:var(--ink); font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; overscroll-behavior:none; }
+    body { display:flex; flex-direction:column; padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
+    .top { display:flex; justify-content:space-between; align-items:center; padding:10px 14px; gap:8px; }
+    .pill { background:var(--card); border-radius:999px; padding:6px 12px; font-size:13px; color:var(--muted); display:flex; gap:6px; align-items:center; max-width:70%; }
+    .dot { width:9px; height:9px; border-radius:50%; background:var(--amber); flex:none; } .dot.ok { background:var(--green); } .dot.off { background:var(--red); }
+    select { background:var(--card); color:var(--ink); border:0; border-radius:999px; padding:7px 10px; font:inherit; font-size:13px; }
+    main { flex:1; overflow-y:auto; padding:6px 14px 18px; display:flex; flex-direction:column; gap:12px; }
+    .tiles { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .tile { border:0; border-radius:22px; padding:22px 8px; background:var(--red); color:#fff; font:inherit; font-weight:800; font-size:19px; display:flex; flex-direction:column; align-items:center; gap:6px; box-shadow:0 6px 0 #991b1b; transition:transform .06s; }
+    .tile:active { transform:translateY(5px); box-shadow:0 1px 0 #991b1b; }
+    .tile .ic { font-size:42px; line-height:1; }
+    .tile.medical { background:#2563eb; box-shadow:0 6px 0 #1e40af; } .tile.flood { background:#0891b2; box-shadow:0 6px 0 #155e75; } .tile.collapse { background:#d97706; box-shadow:0 6px 0 #92400e; }
+    .safe { border:0; border-radius:18px; padding:18px; font:inherit; font-weight:800; font-size:20px; background:var(--green); color:#04210f; width:100%; }
+    .card { background:var(--card); border-radius:18px; padding:14px; }
+    .card h3 { margin:0 0 6px; font-size:13px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+    .big { font-size:20px; font-weight:800; }
+    .bar { height:10px; border-radius:6px; background:#0b1220; overflow:hidden; margin:8px 0 4px; } .bar i { display:block; height:100%; }
+    .row { display:flex; gap:8px; align-items:center; justify-content:space-between; }
+    .go { display:block; text-align:center; text-decoration:none; background:var(--blue); color:#fff; font-weight:800; padding:14px; border-radius:14px; margin-top:10px; font-size:17px; }
+    .warn { background:#78350f; color:#fde68a; border-radius:14px; padding:12px; font-weight:600; }
+    .info { background:#1e3a8a; color:#bfdbfe; border-radius:14px; padding:10px 12px; font-size:14px; }
+    .alt { padding:8px 0; border-top:1px solid #243049; font-size:15px; } .muted { color:var(--muted); font-size:13px; }
+    #map { height:220px; border-radius:14px; display:none; } #map.on { display:block; }
+    .link { background:none; border:0; color:var(--blue); font:inherit; padding:6px 0; }
+    /* countdown overlay */
+    #overlay { position:fixed; inset:0; background:rgba(11,18,32,.96); display:none; flex-direction:column; align-items:center; justify-content:center; gap:20px; z-index:50; text-align:center; padding:24px; }
+    #overlay.on { display:flex; }
+    #count { font-size:120px; font-weight:900; color:var(--red); line-height:1; }
+    #cancel { border:0; border-radius:16px; padding:16px 36px; font:inherit; font-weight:800; font-size:20px; background:#fff; color:#111; }
+    #toast { position:fixed; left:14px; right:14px; bottom:calc(14px + env(safe-area-inset-bottom)); padding:14px; border-radius:14px; background:var(--green); color:#04210f; font-weight:800; text-align:center; transform:translateY(150%); transition:.25s; z-index:60; }
+    #toast.show { transform:none; } #toast.err { background:var(--red); color:#fff; }
+  </style>
+</head>
+<body>
+<div class="top">
+  <div class="pill"><span class="dot" id="dot"></span><span id="gps">GPS…</span></div>
+  <select id="lang"><option value="az">AZ</option><option value="en">EN</option><option value="ru">RU</option></select>
+</div>
+
+<main>
+  <div class="tiles" id="tiles"></div>
+  <button class="safe" id="safe" data-i18n="ui.imSafe">…</button>
+
+  <div id="banners"></div>
+  <div class="card" id="rec" hidden></div>
+  <div id="map"></div>
+  <button class="link" id="mapToggle">🗺️ Map</button>
+  <div class="card" id="others" hidden></div>
+  <select id="district" hidden style="width:100%;padding:14px;border-radius:14px"></select>
+</main>
+
+<div id="overlay"><div class="big" id="ovTitle"></div><div id="count">3</div><button id="cancel">✕</button></div>
+<div id="toast"></div>
+
+<script type="module">
+import { api, citizenId, esc, initMap, langSwitcher, loadLang, name, pctColor, tr } from './common.js';
+
+const TYPES = { FIRE: ['🔥', 'fire'], COLLAPSE: ['🏚️', 'collapse'], FLOOD: ['🌊', 'flood'], MEDICAL: ['🚑', 'medical'] };
+const $ = (id) => document.getElementById(id);
+const QUEUE_KEY = 'sosQueue';
+let pos = null; let acc = null; let rec = null; let lastRecId = null; let manual = false;
+let map, mapLayer;
+
+await loadLang(localStorage.getItem('lang') || 'az');
+langSwitcher($('lang'), () => { buildTiles(); renderDistricts(); render(); gpsLabel(); });
+
+function toast(msg, err = false, ms = 3200) {
+  const el = $('toast'); el.textContent = msg; el.className = `show ${err ? 'err' : ''}`;
+  clearTimeout(toast.t); toast.t = setTimeout(() => { el.className = ''; }, ms);
+}
+const buzz = (p) => navigator.vibrate?.(p);
+
+// ---------- SOS tiles (tap -> 3s cancellable countdown -> send; queued if offline) ----------
+function buildTiles() {
+  $('tiles').innerHTML = Object.entries(TYPES).map(([k, [ic, cls]]) =>
+    `<button class="tile ${cls}" data-t="${k}"><span class="ic">${ic}</span>${esc(tr('sos.' + k))}</button>`).join('');
+  $('tiles').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => countdown(b.dataset.t)));
+}
+buildTiles();
+
+let timer = null;
+function countdown(type) {
+  let n = 3;
+  $('ovTitle').textContent = `${TYPES[type][0]} ${tr('sos.' + type)}`;
+  $('cancel').textContent = '✕ ' + (state.cancelLabel[state.lang] ?? 'Cancel');
+  $('count').textContent = n; $('overlay').classList.add('on'); buzz(60);
+  clearInterval(timer);
+  timer = setInterval(() => {
+    n -= 1; buzz(40);
+    if (n > 0) { $('count').textContent = n; return; }
+    clearInterval(timer); $('overlay').classList.remove('on'); sendSos(type);
+  }, 1000);
+}
+const state = { cancelLabel: { az: 'Ləğv et', en: 'Cancel', ru: 'Отмена' }, get lang() { return localStorage.getItem('lang') || 'az'; } };
+$('cancel').addEventListener('click', () => { clearInterval(timer); $('overlay').classList.remove('on'); });
+
+async function sendSos(type) {
+  if (!pos) { toast(tr('ui.pickOnMap'), true); $('district').hidden = false; return; }
+  const payload = { citizenId: citizenId(), type, lat: pos.lat, lng: pos.lng };
+  try {
+    await api('POST', '/api/sos', { body: payload });
+    buzz([200, 80, 200]); toast(`${TYPES[type][0]} ${tr('ui.sosSent')}`);
+  } catch (e) {
+    if (e.status && e.status < 500 && e.status !== 429) { toast(e.message, true); return; }
+    enqueue(payload); toast('📡 ' + (state.lang === 'az' ? 'Offline – şəbəkə gələndə göndəriləcək' : state.lang === 'ru' ? 'Офлайн – отправим при появлении сети' : 'Offline – will send when back online'), true, 5000);
+  }
+}
+function enqueue(p) { const q = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]'); q.push({ ...p, queuedAt: Date.now() }); localStorage.setItem(QUEUE_KEY, JSON.stringify(q.slice(-20))); }
+async function flush() {
+  const q = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]'); if (!q.length) return;
+  const rest = [];
+  for (const p of q) { try { await api('POST', '/api/sos', { body: p }); } catch (e) { if (!e.status || e.status >= 500 || e.status === 429) rest.push(p); } }
+  localStorage.setItem(QUEUE_KEY, JSON.stringify(rest));
+  if (rest.length < q.length) toast('✅ ' + tr('ui.sosSent'));
+}
+addEventListener('online', flush); setInterval(flush, 15000); flush();
+
+$('safe').addEventListener('click', async () => {
+  try { await api('POST', '/api/safe', { body: { citizenId: citizenId(), ...(pos ?? {}) } }); buzz(100); toast('✅ ' + tr('ui.safeSent')); }
+  catch (e) { toast(e.message, true); }
+});
+
+// ---------- location ----------
+const districts = await api('GET', '/api/districts').catch(() => []);
+function renderDistricts() {
+  const s = $('district'); const cur = s.value;
+  s.innerHTML = `<option value="">📍 ${esc(tr('ui.district'))}…</option>` + districts.map((d) => `<option value="${d.id}">${esc(name(d.name))}</option>`).join('');
+  s.value = cur;
+}
+renderDistricts();
+$('district').addEventListener('change', (e) => {
+  const d = districts.find((x) => x.id === e.target.value);
+  if (d) { manual = true; pos = { lat: d.lat, lng: d.lng }; acc = null; gpsLabel(); refresh(); }
+});
+function gpsLabel() {
+  const dot = $('dot');
+  if (!pos) { $('gps').textContent = 'GPS…'; dot.className = 'dot'; return; }
+  dot.className = `dot ${manual ? '' : 'ok'}`;
+  $('gps').textContent = manual ? tr('ui.district') : `GPS ±${Math.round(acc ?? 0)} ${tr('ui.meters')}`;
+}
+if (navigator.geolocation) {
+  navigator.geolocation.watchPosition((p) => {
+    if (manual) return;
+    const first = !pos;
+    pos = { lat: p.coords.latitude, lng: p.coords.longitude }; acc = p.coords.accuracy; gpsLabel();
+    if (first) refresh();
+  }, () => { $('dot').className = 'dot off'; $('gps').textContent = 'GPS ✕'; $('district').hidden = false; },
+  { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 });
+} else { $('district').hidden = false; }
+addEventListener('offline', () => { $('dot').className = 'dot off'; });
+
+// ---------- evacuation ----------
+async function refresh() {
+  if (!pos) return;
+  try { rec = await api('GET', `/api/evacuation?lat=${pos.lat}&lng=${pos.lng}`); render(); } catch { /* keep last */ }
+}
+setInterval(refresh, 5000);
+
+function render() {
+  if (!rec) return;
+  const r = rec;
+  const best = r.points.find((p) => p.id === r.recommendedPointId);
+  const banners = [];
+  for (const reason of (r.rerouted?.reasons ?? []).filter((x) => x !== 'SHORTER_ROUTE')) banners.push(`<div class="warn">⚠️ ${esc(tr('ui.reroute.' + reason))}</div>`);
+  if (r.noSafePoint) banners.push(`<div class="warn">${esc(tr('ui.noSafePoint'))}</div>`);
+  if (best?.route?.source === 'fallback') banners.push(`<div class="info">ℹ️ ${esc(tr('ui.source.fallback'))}</div>`);
+  $('banners').innerHTML = banners.join('');
+  if (lastRecId && best && best.id !== lastRecId) { buzz([300, 100, 300]); toast('🔁 ' + name(best.name)); }
+  lastRecId = best?.id ?? null;
+
+  if (best) {
+    $('rec').hidden = false;
+    $('rec').innerHTML = `<h3>✅ ${esc(tr('ui.recommended'))}</h3>
+      <div class="big">${esc(name(best.name))}</div>
+      <div class="muted">${esc(tr('point.' + best.type))} · ${best.route.distanceM} ${esc(tr('ui.meters'))} · ~${best.route.etaMin} ${esc(tr('ui.eta'))}</div>
+      <div class="bar"><i style="width:${Math.min(100, best.occupancyPct)}%;background:${pctColor(best.occupancyPct)}"></i></div>
+      <div class="muted">${esc(tr('ui.occupancy'))}: ${best.occupancyPct}%</div>
+      <a class="go" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${best.lat},${best.lng}&travelmode=walking">🧭 ${esc(state.lang === 'az' ? 'Naviqasiya' : state.lang === 'ru' ? 'Навигация' : 'Navigate')}</a>
+      <button class="go" style="background:#334155;width:100%;border:0;font:inherit;font-weight:800" id="here">${esc(tr('ui.checkin'))}</button>`;
+    $('here').addEventListener('click', async () => {
+      try { await api('POST', `/api/points/${best.id}/checkin`, { body: { citizenId: citizenId() } }); buzz(100); toast('✅ ' + tr('ui.checkedIn')); refresh(); }
+      catch (e) { toast(e.message, true); refresh(); }
+    });
+  } else { $('rec').hidden = true; }
+
+  const others = r.points.filter((p) => p.id !== r.recommendedPointId);
+  $('others').hidden = !others.length;
+  $('others').innerHTML = `<h3>${esc(tr('ui.points'))}</h3>` + others.map((p) =>
+    `<div class="alt row"><span>${esc(name(p.name))}<br><span class="muted">${esc(tr('ui.status.' + p.status))}${p.route ? ` · ${p.route.distanceM} ${esc(tr('ui.meters'))}` : ''}</span></span><b style="color:${pctColor(p.occupancyPct)}">${p.occupancyPct}%</b></div>`).join('');
+  drawMap(best);
+}
+
+// ---------- optional map ----------
+$('mapToggle').addEventListener('click', () => {
+  $('map').classList.toggle('on');
+  if ($('map').classList.contains('on') && !map) { map = initMap($('map')); if (map) mapLayer = L.layerGroup().addTo(map); }
+  setTimeout(() => { map?.invalidateSize(); drawMap(rec?.points.find((p) => p.id === rec.recommendedPointId)); }, 50);
+});
+function drawMap(best) {
+  if (!map || !rec) return;
+  mapLayer.clearLayers();
+  L.circleMarker([rec.origin.lat, rec.origin.lng], { radius: 8, color: '#3b82f6', fillOpacity: 1 }).addTo(mapLayer);
+  for (const p of rec.points) L.circleMarker([p.lat, p.lng], { radius: 9, color: pctColor(p.occupancyPct), fillOpacity: .8 }).bindTooltip(`${name(p.name)} ${p.occupancyPct}%`).addTo(mapLayer);
+  if (best?.route) { const g = best.route.geometry.map((x) => [x.lat, x.lng]); L.polyline(g, { color: '#22c55e', weight: 5 }).addTo(mapLayer); map.fitBounds(L.latLngBounds(g).pad(0.3)); }
+}
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+</script>
+</body>
+</html>

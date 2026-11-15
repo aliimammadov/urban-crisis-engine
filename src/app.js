@@ -17,7 +17,7 @@ const PUBLIC_DIR = resolve(fileURLToPath(new URL('../public', import.meta.url)))
 const MAX_BODY = 16 * 1024;
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml',
+  '.css': 'text/css; charset=utf-8', '.webmanifest': 'application/manifest+json', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png',
 };
 
 /**
@@ -154,7 +154,7 @@ export function createApp({
   });
 
   async function serveStatic(req, res, pathname) {
-    const rel = pathname === '/' ? 'index.html' : pathname === '/dispatcher' ? 'dispatcher.html' : pathname.slice(1);
+    const rel = pathname === '/' ? 'index.html' : pathname === '/dispatcher' ? 'dispatcher.html' : pathname === '/mobile' ? 'mobile.html' : pathname.slice(1);
     const full = normalize(join(PUBLIC_DIR, rel));
     if (!full.startsWith(PUBLIC_DIR)) return send(res, 404, { error: 'NOT_FOUND' });
     try {

@@ -134,3 +134,15 @@ test('path traversal on static files is blocked', async () => {
 test('SSE stream requires auth', async () => {
   assert.equal((await fetch(`${base}/api/stream`)).status, 401);
 });
+
+test('mobile PWA assets are served with correct types', async () => {
+  const m = await fetch(`${base}/mobile`);
+  assert.equal(m.status, 200);
+  assert.match(m.headers.get('content-type'), /text\/html/);
+  assert.match(await m.text(), /manifest\.webmanifest/);
+  const man = await fetch(`${base}/manifest.webmanifest`);
+  assert.match(man.headers.get('content-type'), /manifest\+json/);
+  assert.equal((await man.json()).start_url, '/mobile');
+  assert.equal((await fetch(`${base}/sw.js`)).status, 200);
+  assert.equal((await fetch(`${base}/icon.svg`)).status, 200);
+});
