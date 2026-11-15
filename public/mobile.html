@@ -109,6 +109,16 @@
 
   #toast { position:absolute; left:14px; right:14px; bottom:calc(14px + env(safe-area-inset-bottom)); z-index:3000; padding:14px; border-radius:14px; background:#0b0b0f; color:#fff; font-weight:600; text-align:center; transform:translateY(160%); transition:transform .25s; pointer-events:none; }
   #toast.show { transform:none; } #toast.err { background:var(--red-ink); }
+  .profilerow { margin-top:10px; width:100%; display:flex; align-items:center; gap:12px; border:1px solid var(--line); background:#fff; border-radius:16px; padding:11px 14px; text-align:left; }
+  .profilerow .ic { width:36px; height:36px; border-radius:12px; background:var(--soft); display:flex; align-items:center; justify-content:center; flex:none; }
+  .profilerow .t { flex-grow:1; font:700 14px var(--head); } .profilerow.on { border-color:#c4b0f5; background:#f6f1ff; } .profilerow.on .ic { background:#e7dcff; }
+  .prio { display:inline-flex; align-items:center; gap:6px; background:#ede4ff; color:#43228a; border-radius:999px; padding:4px 12px; font:700 13px var(--head); }
+  .accrow { display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:12.5px; color:#43228a; }
+  .accrow span { background:#f3edff; border-radius:999px; padding:2px 10px; font-weight:600; }
+  #profileOverlay { position:absolute; inset:0; z-index:2100; background:rgba(11,11,15,.55); display:none; align-items:flex-end; } #profileOverlay.on { display:flex; }
+  #profileOverlay .safesheet { max-height:92%; overflow-y:auto; }
+  .opt { display:flex; align-items:center; gap:12px; padding:12px 4px; border-top:1px solid #eef0f3; font-size:15px; } .opt input { width:22px; height:22px; accent-color:#6d3fd8; flex:none; }
+  .cdprio { margin-top:10px; background:#fff; color:#43228a; border-radius:999px; padding:6px 14px; font:800 14px var(--head); }
   [hidden] { display:none !important; }
   @media (min-width:431px) { #app { box-shadow:0 0 0 1px var(--line); } }
 </style>
@@ -117,16 +127,16 @@
 <div id="app" data-screen="home">
 
   <!-- ============ HOME ============ -->
-  <section id="home" class="screen" aria-label="Ana ekran">
+  <section id="home" class="screen" data-i18n-aria="app.title">
     <div class="topbar">
       <label class="chip" id="gpsChip"><span class="dot warn" id="gpsDot"></span><span id="gpsText">GPS…</span>
-        <select id="district" aria-label="Rayon"></select></label>
-      <button class="safebtn" id="safeBtn" aria-label="Təhlükəsizəm. Təsdiq üçün basıb saxlayın">
+        <select id="district" data-i18n-aria="ui.district"></select></label>
+      <button class="safebtn" id="safeBtn">
         <svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><circle class="ring-bg" cx="16" cy="16" r="13" fill="none" stroke-width="3.5"/><circle class="ring" cx="16" cy="16" r="13" fill="none" stroke-width="3.5" stroke-linecap="round" transform="rotate(-90 16 16)"/><path d="M10.5 16.5l3.8 3.8 7.2-8" fill="none" stroke="#0b7a42" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <span><b id="safeLabel">Təhlükəsizəm</b><small id="safeHint">basıb saxlayın</small></span>
+        <span><b id="safeLabel"></b><small id="safeHint"></small></span>
       </button>
     </div>
-    <h1 id="hTitle">Nə baş verir?</h1>
+    <h1 id="hTitle"></h1>
     <p class="lead" id="hLead"></p>
     <div class="tiles" id="tiles"></div>
     <div class="spacer"></div>
@@ -135,15 +145,20 @@
       <span style="flex-grow:1;min-width:0"><div class="t" id="rowTitle"></div><div class="s" id="rowSub">…</div></span>
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5f6470" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
     </button>
+    <button class="profilerow" id="profileBtn">
+      <span class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#43228a" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="4.5" r="1.8"/><path d="M12 7.5v5h4.5l2 4.5"/><path d="M7.4 11.2a5.4 5.4 0 1 0 8 7"/></svg></span>
+      <span class="t" id="profileLabel"></span>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5f6470" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
+    </button>
     <div class="foot"><span class="dot" id="netDot"></span><span id="netText"></span></div>
     <div class="langs" id="langs"></div>
   </section>
 
   <!-- ============ ROUTE ============ -->
-  <section id="route" class="screen" aria-label="Marşrut">
+  <section id="route" class="screen" data-i18n-aria="m.routeTitle">
     <div id="map"></div>
     <div class="float" style="top:max(16px,env(safe-area-inset-top));display:flex;gap:8px;align-items:center">
-      <button class="fbtn" id="back" aria-label="Geri"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0b0b0f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+      <button class="fbtn" id="back" data-i18n-aria="m.back"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0b0b0f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
       <div class="ftitle" id="routeTitle"></div>
     </div>
     <div class="float" id="routeBanner" style="top:calc(max(16px,env(safe-area-inset-top)) + 58px)" hidden></div>
@@ -151,17 +166,31 @@
   </section>
 
   <!-- ============ SENT ============ -->
-  <section id="sent" class="screen" aria-label="SOS göndərildi"></section>
+  <section id="sent" class="screen" data-i18n-aria="m.sentTitle"></section>
 
   <!-- ============ COUNTDOWN ============ -->
-  <div id="countdown" role="alertdialog" aria-live="assertive" aria-label="SOS göndərilir">
+  <div id="countdown" role="alertdialog" aria-live="assertive" data-i18n-aria="m.sending">
     <div class="typechip" id="cdType"></div>
     <h2 id="cdTitle"></h2><p id="cdHelp"></p>
     <div class="ringwrap"><svg width="240" height="240" viewBox="0 0 240 240" aria-hidden="true"><circle cx="120" cy="120" r="104" fill="none" stroke="rgba(255,255,255,.22)" stroke-width="12"/><circle id="cdRing" cx="120" cy="120" r="104" fill="none" stroke="#fff" stroke-width="12" stroke-linecap="round" stroke-dasharray="653" stroke-dashoffset="0"/></svg><div id="cdNum">3</div></div>
+    <div class="cdprio" id="cdPrio" hidden></div>
     <div class="cdinfo"><div><span id="cdPlaceL"></span><b id="cdPlace"></b></div><div><span id="cdDistL"></span><b id="cdDist"></b></div></div>
     <div class="spacer"></div>
     <button id="cdCancel"></button>
     <div class="cdnote" id="cdNote"></div>
+  </div>
+
+  <!-- ============ PRIORITY PROFILE ============ -->
+  <div id="profileOverlay" role="dialog" aria-modal="true" aria-labelledby="profTitle">
+    <div class="safesheet">
+      <div class="grab"></div>
+      <h3 id="profTitle"></h3>
+      <div class="warnbox" id="profDesc" style="background:#f3edff;color:#43228a"></div>
+      <div id="profNeeds"></div>
+      <button class="primary" id="profSave" style="flex:none;width:100%"></button>
+      <button class="outline" id="profRemove"></button>
+      <button class="linkbtn" id="profClose" style="align-self:center"></button>
+    </div>
   </div>
 
   <!-- ============ SAFE CONFIRM ============ -->
@@ -171,7 +200,7 @@
       <div style="width:56px;height:56px;border-radius:50%;background:#e6f6ec;display:flex;align-items:center;justify-content:center"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#0b7a42" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
       <h3 id="safeTitle"></h3>
       <div class="warnbox" id="safeWarn"></div>
-      <div class="track" id="track" role="slider" aria-label="Təsdiq üçün sağa sürüşdürün" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
+      <div class="track" id="track" role="slider" data-i18n-aria="m.slide" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
         <div class="fill" id="fill"></div>
         <div class="label" id="trackLabel"></div>
         <div class="thumb" id="thumb"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></div>
@@ -204,6 +233,9 @@ const svg = (d, c, s = 24, w = 1.9) => `<svg width="${s}" height="${s}" viewBox=
 const NAV = 'M4 11l16-7-7 16-2-7z';
 
 let pos = null; let acc = null; let manual = false; let rec = null; let lastBest = null;
+const NEEDS = ['wheelchair', 'reduced_mobility', 'medical_transport'];
+let profile = lsGet('profile', { role: 'citizen', needs: [] }); // priority-SOS role (kept locally so it works offline)
+const isPriority = () => profile.role === 'priority' && profile.needs.length > 0;
 let current = lsGet('currentSos', null); // {id|null, type, createdAt, queued?}
 let map, layers, roadLayer;
 
@@ -224,6 +256,10 @@ function renderStatic() {
   $('routeTitle').textContent = tr('m.routeTitle');
   $('back').setAttribute('aria-label', tr('m.back'));
   $('safeTitle').textContent = tr('m.safeTitle');
+  for (const el of document.querySelectorAll('[data-i18n-aria]')) el.setAttribute('aria-label', tr(el.dataset.i18nAria));
+  $('profTitle').textContent = tr('m.profile.title'); $('profDesc').textContent = tr('m.profile.desc');
+  $('profSave').textContent = tr('m.profile.save'); $('profRemove').textContent = tr('m.profile.remove'); $('profClose').textContent = tr('m.back');
+  renderProfileRow();
   $('safeWarn').textContent = tr('m.safeWarn');
   $('trackLabel').textContent = tr('m.slide');
   $('safeAlt').textContent = tr('m.slideAlt');
@@ -296,7 +332,7 @@ if (navigator.geolocation) {
 async function refresh() {
   if (!pos) return;
   try {
-    rec = await api('GET', `/api/evacuation?lat=${pos.lat}&lng=${pos.lng}`);
+    rec = await api('GET', `/api/evacuation?lat=${pos.lat}&lng=${pos.lng}${isPriority() ? '&accessible=1' : ''}`);
     const roads = await api('GET', '/api/roads').catch(() => null);
     if (roads) window.__roads = roads;
     renderAll();
@@ -310,7 +346,7 @@ function renderAll() { renderHomeRow(); renderRoute(); if (app.dataset.screen ==
 function renderHomeRow() {
   const b = bestPoint(); const sub = $('rowSub');
   if (!rec) { sub.className = 's'; sub.textContent = '…'; return; }
-  if (!b) { sub.className = 's amber'; sub.textContent = tr('ui.noSafePoint'); return; }
+  if (!b) { sub.className = 's amber'; sub.textContent = rec.noAccessibleRoute ? tr('m.noAccessible') : tr('ui.noSafePoint'); return; }
   const reroute = (rec.rerouted?.reasons ?? []).some((r) => r !== 'SHORTER_ROUTE');
   sub.className = `s ${reroute ? 'amber' : ''}`;
   sub.textContent = `${reroute ? tr('m.newRoute') + ' ' : ''}${name(b.name)} · ${b.route.etaMin} ${tr('ui.eta')} · ${tr('m.spaceLeft')}`;
@@ -334,12 +370,14 @@ function renderRoute() {
   ban.innerHTML = reasons.length ? `<span style="flex:none">${svg('M12 3l10 18H2z M12 10v4 M12 17.5h.01', '#9a5b00', 20, 2.1)}</span><span><b>${esc(tr('m.newRoute'))}</b> ${esc(reasons.map((r) => tr('m.reason.' + r)).join(' '))}</span>` : '';
   ban.className = `float ${reasons.length ? 'banner' : ''}`;
   if (!rec) { sheet.innerHTML = '<div class="grab"></div>'; return; }
-  if (!b) { sheet.innerHTML = `<div class="grab"></div><div class="banner">${esc(tr('ui.noSafePoint'))}</div>`; drawMap(); return; }
+  $('routeTitle').textContent = rec.accessible ? tr('m.accessibleRoute') : tr('m.routeTitle');
+  if (!b) { sheet.innerHTML = `<div class="grab"></div><div class="banner">${esc(rec.noAccessibleRoute ? tr('m.noAccessible') : tr('ui.noSafePoint'))}</div>`; drawMap(); return; }
   const others = rec.points.filter((p) => p.id !== b.id).slice(0, 2);
   sheet.innerHTML = `<div class="grab"></div>
     <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px">
-      <div style="min-width:0"><div class="eyebrow">● ${esc(tr('m.nearestSafe'))}</div><div class="pname">${esc(name(b.name))}</div><div class="psub">${b.route.distanceM} ${esc(tr('ui.meters'))} · ${b.occupancyPct}% · ${esc(tr('m.spaceLeft'))}</div></div>
-      <div class="eta"><b>${b.route.etaMin}</b><span>${esc(tr('m.walkMin'))}</span></div></div>
+      <div style="min-width:0"><div class="eyebrow">● ${esc(rec.accessible ? tr('m.nearestAccessible') : tr('m.nearestSafe'))}</div><div class="pname">${esc(name(b.name))}</div><div class="psub">${b.route.distanceM} ${esc(tr('ui.meters'))} · ${b.occupancyPct}% · ${esc(tr('m.spaceLeft'))}</div>
+        ${rec.accessible ? `<div class="accrow" style="margin-top:6px"><b>♿ ${esc(tr('m.accessibleRoute'))}</b>${(b.access ?? []).map((a) => `<span>${esc(tr('acc.' + a))}</span>`).join('')}</div><div class="psub">${esc(tr('m.accessibleOnly'))}</div>` : ''}</div>
+      <div class="eta"><b>${b.route.etaMin}</b><span>${esc(rec.accessible ? tr('ui.eta') : tr('m.walkMin'))}</span></div></div>
     <div class="bar"><i style="width:${Math.min(100, b.occupancyPct)}%;background:${pctColor(b.occupancyPct)}"></i></div>
     <div class="btnrow"><a class="primary" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${b.lat},${b.lng}&travelmode=walking">${svg(NAV, '#fff', 20, 2.2)}${esc(tr('m.navigate'))}</a>
       <button class="secondary" id="heading">${esc(tr('ui.checkin'))}</button></div>
@@ -373,6 +411,7 @@ function startCountdown(type) {
   if (!pos) { toast(tr('m.noGps'), true); $('district').focus?.(); return; }
   cdType = type;
   $('cdType').innerHTML = `${svg(IC[type], '#fff', 22)}${esc(tr('sos.' + type))}`;
+  $('cdPrio').hidden = !isPriority(); $('cdPrio').textContent = `♿ ${tr('m.priority')}`;
   const d = districts.find((x) => x.id === $('district').value);
   $('cdPlace').textContent = `${pos.lat.toFixed(4)}, ${pos.lng.toFixed(4)}${acc ? ` · ±${Math.round(acc)} m` : ''}`;
   $('cdDist').textContent = d ? name(d.name) : '—';
@@ -390,15 +429,15 @@ function startCountdown(type) {
 $('cdCancel').addEventListener('click', () => { clearInterval(cdTimer); $('countdown').classList.remove('on'); });
 
 async function sendSos(type) {
-  const payload = { citizenId: citizenId(), type, lat: pos.lat, lng: pos.lng };
+  const payload = { citizenId: citizenId(), type, lat: pos.lat, lng: pos.lng, ...(isPriority() ? { needs: profile.needs } : {}) };
   try {
     const r = await api('POST', '/api/sos', { body: { ...payload, accuracy: acc ?? undefined } });
-    current = { id: r.id, type, createdAt: r.createdAt ?? Date.now() };
+    current = { id: r.id, type, createdAt: r.createdAt ?? Date.now(), priority: r.priority ?? (isPriority() ? 1 : 2) };
     buzz([200, 80, 200]);
     if (!r.verified) ensureSession(true).catch(() => {}); // token missing/expired (e.g. server restarted): refresh for next time
   } catch (e) {
     if (e.status && e.status < 500 && e.status !== 429) { toast(e.message, true); return; }
-    queue(payload); current = { id: null, type, createdAt: Date.now(), queued: true };
+    queue(payload); current = { id: null, type, createdAt: Date.now(), queued: true, priority: isPriority() ? 1 : 2 };
   }
   lsSet('currentSos', current);
   app.dataset.prev = 'sent';
@@ -411,7 +450,7 @@ async function flush() {
   for (const p of q) {
     try {
       const r = await api('POST', '/api/sos', { body: p });
-      if (current?.queued && current.type === p.type) { current = { id: r.id, type: p.type, createdAt: r.createdAt ?? Date.now() }; lsSet('currentSos', current); }
+      if (current?.queued && current.type === p.type) { current = { id: r.id, type: p.type, createdAt: r.createdAt ?? Date.now(), priority: r.priority ?? current.priority }; lsSet('currentSos', current); }
     } catch (e) { if (!e.status || e.status >= 500 || e.status === 429) rest.push(p); }
   }
   lsSet('sosQueue', rest);
@@ -442,12 +481,13 @@ function renderSent() {
     return `<div class="step ${cls}"><div class="m">${mark}</div><div class="w">${esc(text)}</div><small>${esc(extra)}</small></div>`;
   };
   const eta = sosInfo?.etaMin ? ` · ~${sosInfo.etaMin} ${tr('ui.eta')}` : '';
+  const prio = (sosInfo?.priority ?? current.priority) === 1;
   el.innerHTML = `
     <div class="miniTop"><div class="chip" style="pointer-events:none"><span class="dot ${navigator.onLine ? '' : 'off'}"></span>${esc($('gpsText').textContent)}</div></div>
     <div class="hero ${queued ? 'queued' : ''}"><div class="badge">${queued ? svg('M12 8v5l3 2 M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z', '#9a5b00', 44, 2.2) : svg('M5 12.5l4.5 4.5L19 7.5', '#0b7a42', 44, 2.4)}</div>
-      <h2>${esc(queued ? tr('m.queuedTitle') : tr('m.sentTitle'))}</h2><p>${esc(queued ? tr('m.queuedBody') : tr('m.sentBody'))}</p></div>
+      <h2>${esc(queued ? tr('m.queuedTitle') : tr('m.sentTitle'))}</h2>${prio ? `<div class="prio">♿ ${esc(tr('m.priority'))}</div>` : ''}<p>${esc(queued ? tr('m.queuedBody') : tr('m.sentBody'))}${prio && !queued ? ' ' + esc(tr('m.priorityNote')) : ''}</p></div>
     <div class="box"><div class="hd"><span style="display:flex;align-items:center;gap:10px">${svg(IC[type], TONE[type][1], 24)}${esc(tr('sos.' + type))}</span><small>${esc(time)}</small></div>
-      ${queued ? '' : `<div class="sep"></div>${step(0, tr('m.step1'), stage >= 1 ? time.slice(0, 5) : '')}${step(1, tr('m.step2'), stage === 2 ? tr('m.now') : '')}${step(2, tr('m.step3') + eta, '')}`}</div>
+      ${queued ? '' : `<div class="sep"></div>${step(0, tr('m.step1'), stage >= 1 ? time.slice(0, 5) : '')}${step(1, prio ? tr('m.transportAssign') : tr('m.step2'), stage === 2 ? tr('m.now') : '')}${step(2, (prio ? tr('m.transportOnWay') : tr('m.step3')) + eta, '')}`}</div>
     ${b ? `<div class="card"><div class="eyebrow" style="color:#0066cc">${esc(tr('m.safeExit'))}</div><div style="font:800 18px var(--head);letter-spacing:-0.03em">${esc(name(b.name))} · ${b.route.distanceM} ${esc(tr('ui.meters'))}</div>
       <button class="primary" id="sentRoute" style="flex:none;width:100%">${svg(NAV, '#fff', 18, 2.2)}${esc(tr('m.showRoute'))}</button></div>` : ''}
     <div class="spacer"></div>
@@ -466,6 +506,38 @@ function renderSent() {
   if (left > 0) sentTimer = setTimeout(renderSent, 1000);
 }
 setInterval(() => { if (current?.id && app.dataset.screen === 'sent') pollSos(); }, 4000);
+
+// ------------------------------------------------------------------ priority-SOS profile (reduced mobility / special care)
+function renderProfileRow() {
+  $('profileLabel').textContent = isPriority() ? tr('m.profile.rowOn') : tr('m.profile.row');
+  $('profileBtn').classList.toggle('on', isPriority());
+}
+async function syncProfile() {
+  try { await ensureSession(); await api('POST', '/api/profile', { body: profile }); return true; }
+  catch { return false; } // offline: needs still travel with every SOS and with ?accessible=1
+}
+function openProfile() {
+  $('profNeeds').innerHTML = NEEDS.map((n) => `<label class="opt"><input type="checkbox" value="${n}" ${profile.needs.includes(n) ? 'checked' : ''}><span>${esc(tr('m.need.' + n))}</span></label>`).join('');
+  $('profRemove').hidden = !isPriority();
+  $('profileOverlay').classList.add('on');
+}
+const closeProfile = () => $('profileOverlay').classList.remove('on');
+$('profileBtn').addEventListener('click', openProfile);
+$('profClose').addEventListener('click', closeProfile);
+$('profileOverlay').addEventListener('click', (e) => { if (e.target === $('profileOverlay')) closeProfile(); });
+$('profSave').addEventListener('click', async () => {
+  const needs = [...$('profNeeds').querySelectorAll('input:checked')].map((i) => i.value);
+  if (!needs.length) { toast(tr('m.profile.pickOne'), true); return; }
+  profile = { role: 'priority', needs }; lsSet('profile', profile);
+  closeProfile(); renderProfileRow(); toast(tr('m.profile.saved')); buzz(80);
+  await syncProfile(); refresh();
+});
+$('profRemove').addEventListener('click', async () => {
+  profile = { role: 'citizen', needs: [] }; lsSet('profile', profile);
+  closeProfile(); renderProfileRow(); toast(tr('m.profile.removed'));
+  await syncProfile(); refresh();
+});
+if (isPriority()) syncProfile(); // re-bind the role to this device after a server restart
 
 // ------------------------------------------------------------------ "I'm safe": hold 1.5s -> sheet -> slide (or hold 2s) -> confirm
 const safeBtn = $('safeBtn'); let holdT = null;

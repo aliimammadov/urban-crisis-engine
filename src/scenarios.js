@@ -2,7 +2,7 @@
 // (addSos -> abuse guard -> crisis rules), nothing is faked at the dashboard level.
 import { AppError } from './errors.js';
 
-export const SCENARIO_NAMES = ['cluster', 'fake_flood', 'mass_event', 'filling', 'overcrowd', 'api_outage', 'road_block', 'reset'];
+export const SCENARIO_NAMES = ['priority_sos', 'cluster', 'fake_flood', 'mass_event', 'filling', 'overcrowd', 'api_outage', 'road_block', 'reset'];
 
 // tiny deterministic PRNG so a scenario looks the same every run
 function rng(seed) {
@@ -20,6 +20,16 @@ export function runScenario(name, { store, graph, resetAll }) {
   const district = (id) => store.districts.find((d) => d.id === id);
 
   switch (name) {
+    case 'priority_sos': {
+      const d = district('yasamal');
+      const id = `sim-priority-${now}`;
+      store.setProfile(id, { role: 'priority', needs: ['wheelchair'] });
+      store.addSos(
+        { citizenId: id, type: 'MEDICAL', lat: d.lat + jitter(r, 80) * DEG, lng: d.lng + jitter(r, 80) * DEG, accuracy: 8 },
+        { ip: '198.51.100.77', deviceId: id, verified: true, profile: store.getProfile(id) },
+      );
+      return { name, count: 1 };
+    }
     case 'cluster': {
       const d = district('nasimi');
       for (let i = 0; i < 4; i++) {

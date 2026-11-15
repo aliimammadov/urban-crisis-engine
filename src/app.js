@@ -16,6 +16,7 @@ import { clientIp } from './net.js';
 import { SCENARIO_NAMES, runScenario } from './scenarios.js';
 import { History } from './history.js';
 import { buildOpenApi, renderDocs } from './openapi.js';
+import { normalizeProfile, sanitizeNeeds } from './priority.js';
 import { AbuseGuard } from './abuse.js';
 import { dict, resolveLang, t } from './i18n.js';
 
@@ -47,7 +48,7 @@ export function createApp({
   const graph = new RoadGraph([...data.districts, ...data.points]);
   const routing = new RoutingService(graph, store.chaos, { timeoutMs: routingTimeoutMs });
   const evacuation = new EvacuationService(store, routing);
-  const crisis = new CrisisEngine(store, rules);
+  const crisis = new CrisisEngine(store, rules, { graph });
   const sessions = new Sessions(tokenSecret);
   const guard = new AbuseGuard(store, () => crisis.rules);
   store.guard = guard;
@@ -107,7 +108,10 @@ export function createApp({
     const q = c.url.searchParams;
     const lat = q.has('lat') ? Number(q.get('lat')) : NaN;
     const lng = q.has('lng') ? Number(q.get('lng')) : NaN;
-    return evacuation.recommend({ lat, lng, district: q.get('district') });
+    // a signed device with the priority role always gets the accessible-only route
+    const deviceId = sessions.verify(c.req.headers['x-device-token']);
+    const accessible = q.get('accessible') === '1' || store.getProfile(deviceId)?.role === 'priority';
+    return evacuation.recommend({ lat, lng, district: q.get('district'), accessible });
   });
 
   // Signed device identity. Minting is rate-limited per IP, so spoofing many identities is slow.
@@ -117,12 +121,28 @@ export function createApp({
   route('POST', '/api/sos', { limiter: sosLimiter }, (c) => {
     const verifiedId = sessions.verify(c.req.headers['x-device-token']);
     const body = verifiedId ? { ...c.body, citizenId: verifiedId } : c.body;
-    const sos = store.addSos(body, { ip: c.ip, deviceId: verifiedId ?? undefined, verified: !!verifiedId });
-    return { status: 201, body: { id: sos.id, status: sos.status, createdAt: sos.createdAt, districtId: sos.districtId, verified: sos.verified } };
+    // The priority claim can travel with the SOS (offline queue); only a SIGNED device may make it and bad values are ignored, never an error.
+    const inline = verifiedId ? sanitizeNeeds(c.body.needs) : [];
+    if (inline.length) store.setProfile(verifiedId, { role: 'priority', needs: inline });
+    const sos = store.addSos(body, { ip: c.ip, deviceId: verifiedId ?? undefined, verified: !!verifiedId, profile: verifiedId ? store.getProfile(verifiedId) : null });
+    return { status: 201, body: { id: sos.id, status: sos.status, createdAt: sos.createdAt, districtId: sos.districtId, verified: sos.verified, priority: sos.priority, needs: sos.needs } };
   });
 
   route('GET', '/api/sos/:id', (c) => store.sosStatus(c.params.id));
   route('POST', '/api/sos/:id/cancel', (c) => store.cancelSos(c.params.id, c.body.citizenId));
+
+  // Priority-SOS role (reduced mobility / special care). Needs a signed device so the role is bound to a device identity.
+  const deviceOnly = (c) => {
+    const id = sessions.verify(c.req.headers['x-device-token']);
+    if (!id) throw new AppError(401, 'DEVICE_REQUIRED');
+    return id;
+  };
+  route('GET', '/api/profile', (c) => store.getProfile(deviceOnly(c)) ?? { role: 'citizen', needs: [] });
+  route('POST', '/api/profile', (c) => {
+    const id = deviceOnly(c);
+    const profile = normalizeProfile(c.body);
+    return store.setProfile(id, profile);
+  });
 
   route('POST', '/api/safe', (c) => {
     const lat = c.body.lat; const lng = c.body.lng;
@@ -146,6 +166,12 @@ export function createApp({
   route('POST', '/api/alerts/:id/undo', { perm: 'alert:approve' }, (c) => crisis.undo(c.params.id));
   route('POST', '/api/roads/:id/close', { perm: 'road:write' }, (c) => setRoad(c.params.id, true));
   route('POST', '/api/roads/:id/open', { perm: 'road:write' }, (c) => setRoad(c.params.id, false));
+  route('POST', '/api/roads/:id/accessibility', { perm: 'road:write' }, (c) => {
+    const e = graph.setStepFree(c.params.id, c.body.stepFree !== false);
+    if (!e) throw new AppError(404, 'ROAD_NOT_FOUND');
+    store.emit('change', 'road');
+    return { id: e.id, stepFree: e.stepFree };
+  });
   route('POST', '/api/roads/:id/congestion', { perm: 'road:write' }, (c) => {
     const e = graph.setCongestion(c.params.id, Number(c.body.factor));
     if (!e) throw new AppError(404, 'ROAD_NOT_FOUND');

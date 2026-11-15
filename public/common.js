@@ -10,6 +10,8 @@ export async function loadLang(lang) {
   document.title = tr('app.title');
   document.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = tr(el.dataset.i18n); });
   document.querySelectorAll('[data-i18n-ph]').forEach((el) => { el.placeholder = tr(el.dataset.i18nPh); });
+  document.querySelectorAll('[data-i18n-aria]').forEach((el) => { el.setAttribute('aria-label', tr(el.dataset.i18nAria)); });
+  document.querySelectorAll('[data-i18n-title]').forEach((el) => { el.title = tr(el.dataset.i18nTitle); });
 }
 
 export const tr = (key) => state.messages[key] ?? key;
@@ -41,7 +43,7 @@ export function langSwitcher(select, onChange) {
 }
 
 export function initMap(el, center = [40.41, 49.87], zoom = 12) {
-  if (typeof L === 'undefined') { el.textContent = 'Map library unavailable (offline?) – lists still work.'; return null; }
+  if (typeof L === 'undefined') { el.textContent = tr('ui.mapUnavailable'); return null; }
   const map = L.map(el).setView(center, zoom);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap' }).addTo(map);
   return map;

@@ -30,7 +30,7 @@ test('history: frames contain what the map needs and no identifiers', () => {
   const f = app.history.record({ force: true });
   assert.equal(f.sos.length, 1);
   assert.deepEqual(f.sos[0].slice(2), ['MEDICAL']);
-  assert.ok(f.points.length >= 9 && f.brigades.length === 6);
+  assert.ok(f.points.length >= 9 && f.brigades.length === 8);
   const json = JSON.stringify(f);
   assert.ok(!json.includes('secret-id') && !json.includes('203.0.113.5'));
 });

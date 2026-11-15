@@ -1,5 +1,13 @@
 import { haversine, nearest } from './geo.js';
 
+// Deterministic stand-in for sidewalk data: ~14 % of segments have stairs / steep slope / no kerb ramp.
+function hashPct(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return h % 100;
+}
+export const STEP_FREE_THRESHOLD = 14;
+
 /**
  * Simulated road network. Nodes are districts + assembly points; edges are built
  * with a minimum spanning tree (guarantees connectivity) plus k-nearest neighbours.
@@ -16,7 +24,7 @@ export class RoadGraph {
     const key = [a, b].sort().join('~');
     if (this.edges.has(key)) return;
     const length = haversine(this.nodes.get(a), this.nodes.get(b));
-    this.edges.set(key, { id: key, a, b, length, closed: false, congestion: 1 });
+    this.edges.set(key, { id: key, a, b, length, closed: false, congestion: 1, stepFree: hashPct(key) >= STEP_FREE_THRESHOLD });
     this.adj.get(a).push(key);
     this.adj.get(b).push(key);
   }
@@ -60,6 +68,13 @@ export class RoadGraph {
     return e;
   }
 
+  setStepFree(id, stepFree) {
+    const e = this.edges.get(id);
+    if (!e) return null;
+    e.stepFree = !!stepFree;
+    return e;
+  }
+
   setCongestion(id, factor) {
     const e = this.edges.get(id);
     if (!e) return null;
@@ -75,6 +90,7 @@ export class RoadGraph {
     return [...this.edges.values()].map((e) => ({
       id: e.id,
       closed: e.closed,
+      stepFree: e.stepFree,
       congestion: e.congestion,
       from: this.nodes.get(e.a),
       to: this.nodes.get(e.b),
@@ -82,7 +98,7 @@ export class RoadGraph {
   }
 
   /** Dijkstra. useTraffic=true weights edges by congestion (live data); false = static lengths. */
-  shortestPath(fromId, toId, { useTraffic = true } = {}) {
+  shortestPath(fromId, toId, { useTraffic = true, accessible = false } = {}) {
     if (!this.nodes.has(fromId) || !this.nodes.has(toId)) return null;
     const dist = new Map([[fromId, 0]]);
     const prev = new Map();
@@ -96,7 +112,7 @@ export class RoadGraph {
       done.add(u);
       for (const eid of this.adj.get(u)) {
         const e = this.edges.get(eid);
-        if (e.closed) continue;
+        if (e.closed || (accessible && !e.stepFree)) continue; // accessible mode: only step-free segments
         const v = e.a === u ? e.b : e.a;
         if (done.has(v)) continue;
         const w = e.length * (useTraffic ? e.congestion : 1);
@@ -141,23 +157,23 @@ export class RoutingService {
     this.timeoutMs = timeoutMs;
   }
 
-  async #external(fromId, toId) {
+  async #external(fromId, toId, opts) {
     if (this.chaos.externalDown) throw new Error('EXTERNAL_DOWN');
     if (this.chaos.externalLatencyMs > 0) await sleep(this.chaos.externalLatencyMs);
-    return this.graph.shortestPath(fromId, toId, { useTraffic: true });
+    return this.graph.shortestPath(fromId, toId, { useTraffic: true, ...opts });
   }
 
   /** @returns {Promise<{source:string, blocked:boolean, geometry:Array, distanceM:number, etaMin:number}>} */
-  async route(origin, target) {
+  async route(origin, target, { accessible = false } = {}) {
     const start = this.graph.nearestNode(origin);
     const end = this.graph.nodes.get(target.id) ?? this.graph.nearestNode(target);
     let path;
     let source = 'external';
     try {
-      path = await withTimeout(this.#external(start.id, end.id), this.timeoutMs);
+      path = await withTimeout(this.#external(start.id, end.id, { accessible }), this.timeoutMs);
     } catch {
       source = 'fallback';
-      path = this.graph.shortestPath(start.id, end.id, { useTraffic: false });
+      path = this.graph.shortestPath(start.id, end.id, { useTraffic: false, accessible });
     }
     if (!path) {
       return { source, blocked: true, geometry: [], distanceM: Infinity, etaMin: Infinity };
@@ -170,6 +186,6 @@ export class RoutingService {
     const distanceM = Math.round(
       haversine(origin, this.graph.nodes.get(start.id)) + path.length + haversine(this.graph.nodes.get(end.id), target),
     );
-    return { source, blocked: false, geometry, distanceM, etaMin: Math.max(1, Math.round(distanceM / WALK_M_PER_MIN)), edgeIds: path.edgeIds };
+    return { source, blocked: false, accessible, geometry, distanceM, etaMin: Math.max(1, Math.round(distanceM / WALK_M_PER_MIN)), edgeIds: path.edgeIds };
   }
 }

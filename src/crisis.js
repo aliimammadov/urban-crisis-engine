@@ -21,6 +21,7 @@ export const DEFAULT_RULES = Object.freeze({
 });
 
 export const ALERT_ACTION = 'RED_DISPATCH_AND_OPEN_POINT';
+export const PRIORITY_ACTION = 'DISPATCH_ACCESSIBLE_TRANSPORT';
 
 /**
  * Critical Crisis Algorithm.
@@ -31,8 +32,9 @@ export const ALERT_ACTION = 'RED_DISPATCH_AND_OPEN_POINT';
  * Rules are plain config, so thresholds can be changed at runtime (Challenge Drop friendly).
  */
 export class CrisisEngine {
-  constructor(store, rules = {}) {
+  constructor(store, rules = {}, { graph = null } = {}) {
     this.store = store;
+    this.graph = graph;
     this.rules = { ...DEFAULT_RULES, ...rules };
   }
 
@@ -50,7 +52,7 @@ export class CrisisEngine {
 
   /** Re-evaluates all rules. Idempotent: never creates duplicate alerts for the same situation. */
   evaluate({ focus } = {}) {
-    const created = [...this.#evalClusters(focus), ...this.#evalOvercrowd()];
+    const created = [...this.#evalPriority(focus), ...this.#evalClusters(focus), ...this.#evalOvercrowd()];
     for (const a of created) this.store.emit('alert', a);
     if (created.length) this.store.emit('change', 'alert');
     return created;
@@ -69,6 +71,31 @@ export class CrisisEngine {
     const districts = new Set(centres.map((s) => s.districtId).filter(Boolean));
     for (const id of districts) groups.push(recent.filter((o) => o.districtId === id));
     return groups;
+  }
+
+  /**
+   * Priority #1: ONE SOS from a verified special-care citizen is enough for an immediate alert
+   * (no 4-reporter rule, no verified-only gate: the device is verified by definition).
+   * Quarantined SOS (out of area, bot flood) still do not escalate automatically.
+   */
+  #evalPriority(focus) {
+    const created = [];
+    for (const a of this.store.alerts) {
+      if (a.type !== 'PRIORITY_SOS' || a.status !== 'open') continue;
+      const s = this.store.sos.find((x) => x.id === a.sosId);
+      if (!s || s.status !== 'open' || s.quarantined) a.status = 'expired'; // cancelled / marked safe / quarantined
+    }
+    const candidates = focus ? [focus] : this.store.sos.slice(-2000);
+    for (const s of candidates) {
+      if (s.priority !== 1 || s.status !== 'open' || s.quarantined) continue;
+      const exists = this.store.alerts.some((a) => a.type === 'PRIORITY_SOS' && a.sosId === s.id && a.status !== 'expired');
+      if (exists) continue;
+      created.push(this.#newAlert({
+        type: 'PRIORITY_SOS', priority: 1, action: PRIORITY_ACTION,
+        center: { lat: s.lat, lng: s.lng }, districtId: s.districtId, sosId: s.id, sosIds: [s.id], needs: [...s.needs], reporters: 1,
+      }));
+    }
+    return created;
   }
 
   /** Reporters of an alert that are not quarantined (resolved/cancelled still count: they WERE in danger). */
@@ -172,7 +199,7 @@ export class CrisisEngine {
 
   /** Cheap time-driven pass (no SOS scan): forecasts and expiries change as time passes, not only on events. */
   tick() {
-    const created = this.#evalOvercrowd();
+    const created = [...this.#evalPriority(null), ...this.#evalOvercrowd()];
     this.#expireQuarantined();
     for (const a of created) this.store.emit('alert', a);
     if (created.length) this.store.emit('change', 'alert');
@@ -194,6 +221,7 @@ export class CrisisEngine {
 
   /** What approve() WOULD do, without doing it (shown to the dispatcher before the click). */
   plan(alert) {
+    if (alert.type === 'PRIORITY_SOS') return this.#priorityPlan(alert);
     const free = alert.level === 'amber' ? [] : [...this.store.brigades.values()].filter((b) => b.status === 'available');
     const b = nearest(alert.center, free);
     const reserves = [...this.store.points.values()].filter((p) => !p.active);
@@ -202,6 +230,34 @@ export class CrisisEngine {
       brigade: b ? { id: b.item.id, name: b.item.name, etaMin: this.#eta(b.distance) } : null,
       point: np ? { id: np.item.id, name: np.item.name, capacity: np.item.capacity } : null,
     };
+  }
+
+  /** Accessible transport first; if none is free, the nearest medical brigade (flagged as fallback). */
+  #priorityPlan(alert) {
+    const avail = [...this.store.brigades.values()].filter((b) => b.status === 'available');
+    let v = nearest(alert.center, avail.filter((b) => b.kind === 'accessible_transport'));
+    let fallback = false;
+    if (!v) { v = nearest(alert.center, avail.filter((b) => b.kind === 'medical')); fallback = !!v; }
+    return {
+      brigade: v ? { id: v.item.id, name: v.item.name, kind: v.item.kind, etaMin: this.#eta(v.distance), fallback } : null,
+      point: null,
+      accessiblePoint: this.#accessiblePoint(alert.center),
+    };
+  }
+
+  /** Nearest accessible active point reachable over step-free roads, with the accessible route length. */
+  #accessiblePoint(center) {
+    if (!this.graph) return null;
+    const start = this.graph.nearestNode(center);
+    let best = null;
+    for (const p of this.store.listPoints({ activeOnly: true })) {
+      if (!p.accessible) continue;
+      const path = this.graph.shortestPath(start.id, p.id, { accessible: true });
+      if (!path) continue;
+      const distanceM = Math.round(haversine(center, start) + path.length);
+      if (!best || distanceM < best.distanceM) best = { id: p.id, name: p.name, distanceM, access: p.access ?? [] };
+    }
+    return best;
   }
 
   #eta(distanceM) {
@@ -223,13 +279,14 @@ export class CrisisEngine {
       b.alertId = alert.id;
     }
     const np = p.point ? this.store.points.get(p.point.id) : null;
-    if (np) np.active = true;
+    if (np) np.active = true; // priority alerts have no point to open (they dispatch accessible transport)
 
     alert.status = 'approved';
     this.store.guard?.reward(alert.sosIds ?? []); // corroborated reporters gain trust
     alert.approvedAt = this.store.now();
     alert.approvedBy = actor;
     alert.result = { brigadeId: b?.id ?? null, openedPointId: np?.id ?? null, etaMin: p.brigade?.etaMin ?? null };
+    if (alert.type === 'PRIORITY_SOS') alert.result = { ...alert.result, accessible: true, fallback: !!p.brigade?.fallback, accessiblePointId: p.accessiblePoint?.id ?? null };
     this.store.emit('change', 'alert');
     return alert;
   }

@@ -9,7 +9,7 @@ Zero-dependency prototype (Node ≥ 20, no `npm install`). Two modules in one se
 
 ```bash
 npm start            # http://localhost:3000   (PORT=… to change)
-npm test             # 90 tests, ~0.5s
+npm test             # 116 tests, ~0.5s
 docker compose up --build   # optional (Dockerfile written, image not built on the author's machine)
 npm run demo         # fires a SOS cluster + overcrowding + API outage (server must be running)
 npm run load         # load test (start server with SOS_BURST=100000 API_BURST=100000 to disable limits)
@@ -62,6 +62,8 @@ Add `?lang=az|en|ru` for localized error messages.
 * **Demo scenarios panel** (admin): cluster, fake flood, genuine mass event, filling point, overcrowd, API outage, road block, reset. They run the real pipeline.
 * **Time machine**: replay the last 2 hours of the situation on the dispatcher map.
 * **API docs**: `/api/docs` (offline) and `/api/openapi.json`; a test keeps them in sync with the real routes.
+* **Priority-SOS role (reduced mobility / special care)**: a signed device can declare needs (wheelchair, reduced mobility, medical transport). Every SOS from it is automatically **Critical Priority #1**: one SOS raises an immediate alert at the top of the dispatcher list, the citizen gets an **accessible-only route** (ramped/step-free points, step-free road segments) and the dispatcher dispatches **accessible transport** (fallback: nearest medical brigade, flagged). Demo scenario: `priority_sos`.
+* **Full az/en (and ru) i18n**: every UI string, ARIA label and error message comes from the dictionary and switches without reload; tests fail on any hardcoded text or missing key.
 * **Technical write-up**: [docs/TEXNIKI_IZAH.md](docs/TEXNIKI_IZAH.md).
 
 ## Known limitations (honest list)

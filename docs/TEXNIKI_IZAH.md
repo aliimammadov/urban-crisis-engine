@@ -75,7 +75,22 @@ Etibarlı kompromis: əgər təhlükəli bir saxtakar çoxlu real IP-dən təsdi
 - **Histerezis:** qırmızı doluluq həyəcanı yalnız doluluq **<90%** olanda bağlanır (95%-ə yaxın yanıb-sönmə yoxdur).
 - **Cooldown:** təsdiqdən sonra eyni məntəqə üçün 5 dəqiqə yeni həyəcan yaranmır, **98%-ə** çatmasa.
 
-### 5.6 Zaman maşını (`history.js`)
+### 5.6 Prioritet SOS rolu və əlçatan təxliyyə (`priority.js`, `routing.js`, `evacuation.js`, `crisis.js`)
+**Rol.** İki vətəndaş rolu var: `citizen` və `priority` (hərəkət məhdudiyyətli / xüsusi qayğıya ehtiyacı olan şəxs). Ehtiyaclar: `wheelchair` (əlil arabası), `reduced_mobility` (çətin yeriyir), `medical_transport` (tibbi nəqliyyat). Rol **imzalı cihaza** bağlıdır (`POST /api/profile`, `X-Device-Token` tələb olunur); imzasız cihaz prioritet iddia edə bilməz. Ehtiyac bəyanı SOS ilə birlikdə də gedə bilər (offline növbə üçün), səhv/zibil dəyər **heç vaxt SOS-u rədd etmir**, sadəcə atılır.
+
+**Avtomatik Kritik Prioritet #1.** Prioritet rollu cihazın hər SOS-u `priority = 1` alır və `PRIORITY_SOS` həyəcanı **dərhal** yaranır: "4 nəfər" qaydası tətbiq olunmur, bir SOS kifayətdir. Həyəcan dispetçer siyahısında hər şeydən üstdə göstərilir. Şəxs SOS-u ləğv edərsə, "Təhlükəsizəm" basarsa və ya SOS karantinə düşərsə (məs., ərazidən kənar koordinat) həyəcan çəkilir. Karantindəki SOS dispetçer "Burax" edəndən sonra yenidən işə düşür.
+
+**Əlçatan marşrut.** Hər məntəqənin `accessible` (pandus / pilləsiz giriş) və `access` (pandus, lift, geniş qapı, əlçatan tualet) xüsusiyyətləri var. Hər yol seqmentinin `stepFree` bayrağı var (simulyasiyada seqmentlərin ~14%-i pilləli/sıldırım sayılır; dispetçer bunu `POST /api/roads/:id/accessibility` ilə dəyişə bilər). Əlçatan rejimdə (prioritet rollu imzalı cihaz üçün avtomatik, və ya `?accessible=1`):
+- yalnız `accessible` məntəqələr təklif olunur;
+- Dijkstra yalnız `stepFree` seqmentlərlə gedir (xarici API və lokal ehtiyat marşrutlaşdırma eyni qaydanı bilir);
+- ən yaxın məntəqədə pandus yoxdursa, səbəb `NOT_ACCESSIBLE` kimi yazılır;
+- pilləsiz marşrutla heç bir məntəqəyə çatmaq mümkün deyilsə, `noAccessibleRoute` + `needsTransport` qaytarılır, nəqliyyat vətəndaşın yerinə gəlir.
+
+**Nəqliyyat təyinatı.** Təsdiqdə ən yaxın azad **əlçatan nəqliyyat** (`accessible_transport`, lift/pandus avtomobili) göndərilir; azad yoxdursa ən yaxın tibbi briqada **işarələnmiş ehtiyat** kimi seçilir (dispetçerə yazılır), heç biri yoxdursa təsdiq xəta vermir və "azad nəqliyyat yoxdur" göstərilir. Ehtiyat məntəqə açılmır. `plan()` bunu təsdiqdən əvvəl göstərir; testlər `approve()`-un `plan()`-a uyğunluğunu yoxlayır.
+
+**Etibar məsələsi.** Rol özü-bəyandır (əlilliyi sistem yoxlaya bilməz). Sui-istifadə riskini azaldan: yalnız imzalı cihaz, eyni karantin/bot müdafiəsi, dispetçerə "özü bəyan edib" yazılması. Real yerləşdirmədə rolun sosial müdafiə reyestri ilə təsdiqi əlavə edilə bilər.
+
+### 5.7 Zaman maşını (`history.js`)
 Hadisə zamanı (1 san. ərzində bir dəfə) və hər 5 saniyədən bir kompakt kadr yazılır: məntəqə doluluqları, SOS koordinatları (kadra ≤150), həyəcanlar, briqadalar, bağlı yollar. İdentifikatorlar kadra düşmür. Dispetçer son 2 saatı sürüşdürə və ya oynada, "həyəcan necə yarandı" göstərə bilər.
 
 ## 6. İstifadəçi interfeysi
@@ -83,11 +98,11 @@ Dizayn istiqaməti: DevLink-in təmiz dili (`#0071e3`, Plus Jakarta Sans/Inter, 
 - **Təsadüfi toxunuş riski:** "Təhlükəsizəm" SOS düymələrindən ən uzaq nöqtədədir və **basıb saxlamaqla** (1,5 san.) + sürüşdürmə ilə təsdiqlənir, çünki təsadüfən basılsa açıq SOS bağlanar. Sürüşdürə bilməyənlər üçün 2 saniyə basıb saxlama alternativi, klaviatura ilə Enter/Space var.
 - SOS düymələri başparmaq zonasındadır; geri sayım və 60 saniyəlik "Səhv göndərdim" ləğvi var.
 - Mətnlər sadədir: təhlükədə olan adama reklam tonu yoxdur.
-- Dil: az / en / ru; xətalar da lokallaşır. Yeni dil = `i18n-ext.js`-də bir obyekt.
+- **Dil (i18n):** az / en (+ ru); bütün UI, xəta mesajları, ARIA etiketləri, giriş pəncərəsi, simulyasiya düymələri, məntəqə və rayon adları açarlarla gəlir və səhifə yenilənmədən dəyişir. Testlər: az/en açar dəstinin eyniliyi, UI fayllarında hardcoded Azərbaycan/kiril mətninin olmaması, UI-da işlədilən hər açarın lüğətdə olması, hər enum dəyərinin (SOS növü, ehtiyac, əlçatanlıq xüsusiyyəti, səbəb və s.) tərcüməsi, serverin atdığı hər xəta kodunun tərcüməsi. Yeni dil = `i18n-ext.js`-də bir obyekt.
 - Dispetçer: təsdiqdən əvvəl nəticə önbaxışı, 10 san. geri qaytarma, karantin siyahısı + "Burax", hücum/artım xəbərdarlığı, ssenari paneli, zaman maşını.
 
 ## 7. Keyfiyyət və test
-- **90 avtomatik test** (`npm test`, ~0,5 san.): alqoritm sərhəd halları (dəqiq 95%, eyni şəxsin təkrar SOS-u, 5 dəqiqədən köhnə SOS), idempotentlik, geri qaytarma, marşrut ehtiyatı, auth/rollar, sürət limiti, saxta SOS ssenariləri, real kütləvi hadisədə heç kimin bloklanmaması, OpenAPI ilə real marşrut cədvəlinin uyğunluğu, dillərin eyni açar dəstinə malik olması.
+- **264 açar/dil, 116 avtomatik test** (`npm test`, ~0,5 san.): alqoritm sərhəd halları (dəqiq 95%, eyni şəxsin təkrar SOS-u, 5 dəqiqədən köhnə SOS), idempotentlik, geri qaytarma, marşrut ehtiyatı, auth/rollar, sürət limiti, saxta SOS ssenariləri, real kütləvi hadisədə heç kimin bloklanmaması, OpenAPI ilə real marşrut cədvəlinin uyğunluğu, dillərin eyni açar dəstinə malik olması.
 - **Yük testi** (`npm run load`, lokal, 50 paralel, SOS + təxliyyə sorğusu qarışığı): ~5 000+ sorğu/san., p95 ≈ 16 ms.
 - Dispetçer paneli real Chrome-da (başsız rejim) ssenarilərlə yoxlanılıb. Mobil ana ekran render yoxlanılıb; geri sayım, "göndərildi" və təsdiq ekranlarının əl ilə klik testi aparılmayıb.
 - `Dockerfile` və `docker-compose.yml` hazırdır; image-in tərkibi və healthcheck əmri təmiz qovluqda əl ilə təkrarlanıb, lakin bu maşında Docker daemon işləmədiyi üçün **image real build edilməyib**.
@@ -102,8 +117,9 @@ Dizayn istiqaməti: DevLink-in təmiz dili (`#0071e3`, Plus Jakarta Sans/Inter, 
 
 | Dəyişiklik | Necə həll olunur |
 |---|---|
-| Yeni rol | `auth.js` → `ROLE_PERMISSIONS` + token (`observer` artıq nümunədir) |
-| Yeni dil | `i18n-ext.js` → bir obyekt, test açar uyğunluğunu yoxlayır |
+| **Yeni rol: Prioritet SOS (hərəkət məhdudiyyətli)** | `priority.js` + `POST /api/profile`. Avtomatik Kritik Prioritet #1, əlçatan marşrut, əlçatan nəqliyyat (5.6). Ssenari: `priority_sos` |
+| Personal (dispetçer) rolu | `auth.js` → `ROLE_PERMISSIONS` + token (`observer` artıq nümunədir) |
+| UI-ın az/en dinamik dəyişməsi, yeni dil | `i18n-ext.js` → bir obyekt. Səhifə yenilənmədən dəyişir, test hər açarı yoxlayır |
 | Xarici API kəsintisi/yavaşlığı | Avtomatik ehtiyat marşrut, vətəndaşa bildirilir. Ssenari: `api_outage` |
 | Yüksək yük | Sürət limitləri, fokuslu qiymətləndirmə, SSE birləşdirmə, flood zamanı təhlil throttle. Ssenari: `fake_flood`, `mass_event` |
 | Təhlükəsizlik tələbi | İmzalı sessiyalar, "Təhlükəsizlik rejimi" (`requireVerified`) iş vaxtı bir düymə ilə, rol/icazə |
@@ -113,6 +129,7 @@ Dizayn istiqaməti: DevLink-in təmiz dili (`#0071e3`, Plus Jakarta Sans/Inter, 
 ## 9. Məhdudiyyətlər
 - Vəziyyət yaddaşdadır, restartda sıfırlanır (bir instans). `TOKEN_SECRET` verilməsə, imzalı sessiyalar restartdan sonra yenidən alınır.
 - Yol şəbəkəsi sintetikdir (real küçələr deyil), marşrut qraf düyünləri arasında düz seqmentlərdir. ETA piyada sürəti (80 m/dəq) və briqada üçün ~36 km/s ilə təxmin edilir.
+- Əlçatanlıq məlumatı (məntəqələrdə pandus/lift, yol seqmentlərində pilləsizlik) simulyasiyadır, real sidewalk məlumatı yoxdur. Əlçatan marşrutun ETA-sı piyada sürəti ilə təxmin edilir. Prioritet rol özü-bəyandır.
 - Cihaz kimliyi telefon/OTP ilə bağlı deyil. Saxtakar ayrı IP-lərdən çoxlu imzalı cihaz yaradıb gözləyərsə, müdafiəni keçə bilər. IP əsaslı təhlil CGNAT arxasında zəifdir (buna görə təqsirkar yalnız imzasız və ya yeni cihazlar sayılır).
 - Xəritə plitələri OpenStreetMap-dən yüklənir (internetsiz xəritə fonu boş görünür, marşrutlar və məntəqələr isə çəkilir). Leaflet lokaldır.
 - Dolma sürəti xətti ekstrapolyasiyadır. Qəfil dəyişikliklərdə (axın dayanması) proqnoz gec yenilənir (5 dəqiqəlik pəncərə).

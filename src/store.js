@@ -24,6 +24,7 @@ export class Store extends EventEmitter {
     this.brigades = new Map(s.brigades.map((b) => [b.id, { ...b }]));
     this.sos = [];
     this.safe = new Map();
+    this.profiles = new Map(); // deviceId -> {role, needs, updatedAt}  (priority-SOS role)
     this.checkins = new Map(); // citizenId -> pointId
     this.alerts = [];
     // mutate in place: RoutingService holds a live reference to this object
@@ -84,6 +85,9 @@ export class Store extends EventEmitter {
       accuracy: Number.isFinite(accuracy) && accuracy >= 0 ? Math.min(accuracy, 100_000) : null,
       quarantined: false,
       flags: [],
+      // Priority #1 only for a SIGNED device whose profile role is "priority" (self-declared special-care need)
+      priority: meta.verified && meta.profile?.role === 'priority' ? 1 : 2,
+      needs: meta.verified && meta.profile?.role === 'priority' ? [...meta.profile.needs] : [],
     };
     this.sos.push(sos);
     if (this.sos.length > MAX_SOS) this.sos.splice(0, this.sos.length - MAX_SOS);
@@ -91,6 +95,18 @@ export class Store extends EventEmitter {
     this.guard?.assess(sos); // may flag/quarantine BEFORE crisis rules run
     this.emit('change', 'sos', sos);
     return sos;
+  }
+
+  getProfile(deviceId) {
+    return this.profiles.get(deviceId) ?? null;
+  }
+
+  /** Stores an already-validated profile (see priority.js). */
+  setProfile(deviceId, { role, needs }) {
+    const p = { role, needs: [...needs], updatedAt: this.now() };
+    this.profiles.set(deviceId, p);
+    this.emit('change', 'profile');
+    return p;
   }
 
   findSos(id) {
@@ -115,7 +131,7 @@ export class Store extends EventEmitter {
     const dispatched = this.alerts.find((a) => a.status === 'approved' && a.sosIds?.includes(id));
     const stage = s.status === 'cancelled' ? 0 : dispatched ? 3 : 2;
     return {
-      id: s.id, type: s.type, status: s.status, createdAt: s.createdAt, stage,
+      id: s.id, type: s.type, status: s.status, createdAt: s.createdAt, stage, priority: s.priority, needs: s.needs,
       etaMin: dispatched?.result?.etaMin ?? null,
       cancelMsLeft: s.status === 'open' ? Math.max(0, s.createdAt + this.cancelWindowMs - this.now()) : 0,
     };
@@ -229,6 +245,7 @@ export class Store extends EventEmitter {
     return {
       id: s.id, type: s.type, lat: s.lat, lng: s.lng, note: s.note, districtId: s.districtId, createdAt: s.createdAt,
       status: s.status, verified: s.verified, trust: s.trust ?? null, flags: s.flags, quarantined: s.quarantined,
+      priority: s.priority, needs: s.needs,
     };
   }
 
@@ -243,6 +260,7 @@ export class Store extends EventEmitter {
       brigades: [...this.brigades.values()].map((b) => ({ ...b })),
       sos: openSos.slice(-300).map((s) => this.publicSos(s)),
       sosTotalOpen: openSos.length,
+      priorityOpen: openSos.filter((s) => s.priority === 1).length,
       quarantined: quarantined.slice(-50).map((s) => this.publicSos(s)),
       quarantinedTotal: quarantined.length,
       abuse: this.guard ? { ...this.guard.verdict } : null,

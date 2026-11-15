@@ -21,7 +21,11 @@ export class EvacuationService {
     this.candidates = candidates;
   }
 
-  async recommend({ lat, lng, district }) {
+  /**
+   * @param accessible  true for priority (reduced-mobility) citizens: only accessible points (ramp / step-free)
+   *                    and only step-free road segments are considered.
+   */
+  async recommend({ lat, lng, district, accessible = false }) {
     let origin;
     if (isValidCoord(lat, lng)) {
       origin = { lat, lng };
@@ -33,13 +37,14 @@ export class EvacuationService {
       throw new AppError(400, 'INVALID_COORDS');
     }
 
-    const ranked = this.store
-      .listPoints({ activeOnly: true })
+    const active = this.store.listPoints({ activeOnly: true });
+    const nearestAny = active.map((p) => ({ p, d: haversine(origin, p) })).sort((a, b) => a.d - b.d)[0]?.p ?? null;
+    const ranked = (accessible ? active.filter((p) => p.accessible) : active)
       .map((p) => ({ p, straight: haversine(origin, p) }))
       .sort((a, b) => a.straight - b.straight)
       .slice(0, this.candidates);
 
-    const routes = await Promise.all(ranked.map(({ p }) => this.routing.route(origin, p)));
+    const routes = await Promise.all(ranked.map(({ p }) => this.routing.route(origin, p, { accessible })));
 
     const points = ranked.map(({ p, straight }, i) => {
       const r = routes[i];
@@ -53,7 +58,8 @@ export class EvacuationService {
         id: p.id, type: p.type, name: p.name, lat: p.lat, lng: p.lng,
         capacity: p.capacity, occupied: p.occupied, occupancyPct: p.occupancyPct, projectedPct, fillingFast,
         status, straightDistanceM: Math.round(straight),
-        route: r.blocked ? null : { geometry: r.geometry, distanceM: r.distanceM, etaMin: r.etaMin, source: r.source },
+        accessible: !!p.accessible, access: p.access ?? [],
+        route: r.blocked ? null : { geometry: r.geometry, distanceM: r.distanceM, etaMin: r.etaMin, source: r.source, accessible },
       };
     });
 
@@ -65,13 +71,16 @@ export class EvacuationService {
     // Explain a reroute relative to the nearest-by-air point
     const nearestPoint = points[0] ?? null;
     let rerouted = null;
-    if (nearestPoint && recommended && recommended.id !== nearestPoint.id) {
+    // an accessible user skips a nearer point that has stairs / no ramp
+    const skippedInaccessible = accessible && recommended && nearestAny && !nearestAny.accessible;
+    if (nearestPoint && recommended && (recommended.id !== nearestPoint.id || skippedInaccessible)) {
       const reasons = [];
-      if (nearestPoint.status === 'full') reasons.push('POINT_FULL');
-      if (nearestPoint.status === 'unreachable') reasons.push('ROAD_BLOCKED');
-      if (nearestPoint.fillingFast) reasons.push('POINT_FILLING_FAST');
+      if (skippedInaccessible) reasons.push('NOT_ACCESSIBLE');
+      if (nearestPoint.status === 'full' && recommended.id !== nearestPoint.id) reasons.push('POINT_FULL');
+      if (nearestPoint.status === 'unreachable' && recommended.id !== nearestPoint.id) reasons.push('ROAD_BLOCKED');
+      if (nearestPoint.fillingFast && recommended.id !== nearestPoint.id) reasons.push('POINT_FILLING_FAST');
       rerouted = {
-        fromPointId: nearestPoint.id,
+        fromPointId: skippedInaccessible ? nearestAny.id : nearestPoint.id,
         reasons: reasons.length ? reasons : ['SHORTER_ROUTE'],
       };
     }
@@ -81,6 +90,9 @@ export class EvacuationService {
       recommendedPointId: recommended?.id ?? null,
       rerouted,
       noSafePoint: !recommended,
+      accessible,
+      noAccessibleRoute: accessible && !recommended, // no step-free route to an accessible point: transport must come to the citizen
+      needsTransport: accessible,
       points,
     };
   }
