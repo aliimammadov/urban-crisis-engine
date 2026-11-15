@@ -169,9 +169,11 @@ test('API: sos status, cancel, plan on dashboard, approve then undo', async () =
   assert.equal(cancelled.json.status, 'cancelled');
 });
 
-test('"/" serves the citizen app and "/dispatcher" the panel', async () => {
-  const home = await (await fetch(`${base}/`)).text();
-  assert.match(home, /id="app"/);
+test('"/" serves the landing page, "/mobile" the citizen app and "/dispatcher" the panel', async () => {
+  const landing = await (await fetch(`${base}/`)).text();
+  assert.match(landing, /data-i18n="l\.h1"/);
+  const home = await (await fetch(`${base}/mobile`)).text();
+  assert.match(home, /id="safeBtn"/);
   const disp = await (await fetch(`${base}/dispatcher`)).text();
   assert.match(disp, /id="alerts"/);
 });

@@ -340,7 +340,7 @@ export function createApp({
   });
 
   async function serveStatic(req, res, pathname) {
-    const rel = pathname === '/' || pathname === '/mobile' ? 'mobile.html' : pathname === '/dispatcher' ? 'dispatcher.html' : pathname === '/landing' ? 'landing.html' : pathname.slice(1);
+    const rel = pathname === '/' || pathname === '/landing' ? 'landing.html' : pathname === '/mobile' || pathname === '/app' ? 'mobile.html' : pathname === '/dispatcher' ? 'dispatcher.html' : pathname === '/landing' ? 'landing.html' : pathname.slice(1);
     const full = normalize(join(PUBLIC_DIR, rel));
     if (!full.startsWith(PUBLIC_DIR)) return send(res, 404, { error: 'NOT_FOUND' });
     try {
