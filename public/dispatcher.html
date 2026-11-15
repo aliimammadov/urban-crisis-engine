@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="az">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dispatcher</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="/style.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+<header>
+  <h1 data-i18n="app.title">…</h1>
+  <nav><a href="/" data-i18n="ui.citizen">Vətəndaş</a><a href="/dispatcher" data-i18n="ui.dispatcher">Dispetçer</a></nav>
+  <div class="row">
+    <input id="token" type="password" value="admin-demo" data-i18n-ph="ui.token" style="width:150px">
+    <button id="connect" class="primary" data-i18n="ui.connect">…</button>
+    <select id="lang"><option value="az">AZ</option><option value="en">EN</option><option value="ru">RU</option></select>
+  </div>
+</header>
+<main>
+  <section class="panel">
+    <div class="card"><h2 data-i18n="ui.alerts">…</h2><div id="alerts"></div></div>
+    <div class="card"><h2 data-i18n="ui.zones">…</h2><table id="zones"></table>
+      <p class="muted"><span data-i18n="ui.safeCount"></span>: <b id="safeCount">0</b> · <span data-i18n="ui.openSos"></span>: <b id="sosTotal">0</b></p></div>
+    <div class="card"><h2 data-i18n="ui.points">…</h2><div id="points"></div></div>
+    <div class="card"><h2 data-i18n="ui.brigades">…</h2><table id="brigades"></table></div>
+    <div class="card"><h2 data-i18n="ui.sim">…</h2>
+      <div class="row">
+        <select id="simPoint"></select>
+        <input id="simPct" type="number" min="0" max="100" value="96" style="width:70px">%
+        <button id="simSet">Set</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="chaosOn">External API ✖</button><button id="chaosOff">External API ✔</button>
+        <button id="roadRandom">🚧 <span data-i18n="ui.closeRoad"></span></button>
+        <button id="reset">Reset</button>
+      </div>
+      <p class="muted" id="simMsg"></p>
+    </div>
+  </section>
+  <div id="map"></div>
+</main>
+<div id="toast" class="toast"></div>
+
+<script type="module">
+import { api, esc, initMap, langSwitcher, loadLang, name, pctColor, toast, tr } from './common.js';
+
+let token = localStorage.getItem('dtoken') || document.getElementById('token').value;
+document.getElementById('token').value = token;
+let snap = null; let es = null; let roads = [];
+let map, layers = {};
+
+await loadLang(localStorage.getItem('lang') || 'az');
+langSwitcher(document.getElementById('lang'), () => snap && render(snap));
+
+map = initMap(document.getElementById('map'));
+if (map) for (const k of ['roads', 'zones', 'points', 'sos', 'brigades']) layers[k] = L.layerGroup().addTo(map);
+
+document.getElementById('connect').addEventListener('click', () => {
+  token = document.getElementById('token').value;
+  localStorage.setItem('dtoken', token);
+  connect();
+});
+
+async function connect() {
+  es?.close();
+  try { await api('GET', '/api/dashboard', { token }); } catch (e) { toast(e.message, 'err'); return; }
+  roads = await api('GET', '/api/roads');
+  es = new EventSource(`/api/stream?token=${encodeURIComponent(token)}`);
+  es.addEventListener('snapshot', async (ev) => { snap = JSON.parse(ev.data); roads = await api('GET', '/api/roads').catch(() => roads); render(snap); });
+  es.onerror = () => toast('Live feed reconnecting…', 'err'); // EventSource auto-reconnects
+}
+
+async function act(fn) { try { await fn(); } catch (e) { toast(e.message, 'err'); } }
+
+function render(s) {
+  document.getElementById('safeCount').textContent = s.safeCount;
+  document.getElementById('sosTotal').textContent = s.sosTotalOpen;
+
+  // alerts
+  const alerts = s.alerts;
+  document.getElementById('alerts').innerHTML = alerts.length ? alerts.map((a) => {
+    const zone = s.zones.find((z) => z.id === a.districtId);
+    const done = a.status !== 'open';
+    return `<div class="alert-red ${done ? 'done' : ''}">
+      <strong>${done ? '✅' : '🚨'} ${esc(tr('alert.' + a.type))}</strong> — ${esc(name(zone?.name) ?? '')}<br>
+      ${done ? '' : `<b>${esc(tr('alert.RED_DISPATCH_AND_OPEN_POINT'))}</b><br>`}
+      <span class="muted">${a.type === 'SOS_CLUSTER' ? `${a.reporters} ${esc(tr('ui.reporters'))}` : `${a.occupancyPct}%`} · ${new Date(a.createdAt).toLocaleTimeString()}</span>
+      ${a.status === 'open' ? `<div style="margin-top:8px"><button class="danger" data-approve="${a.id}">${esc(tr('ui.approve'))}</button></div>`
+        : a.status === 'approved' ? `<div class="muted">${esc(tr('ui.approved'))}: ${esc(a.result.brigadeId ?? '—')} → ${esc(a.result.openedPointId ?? '—')}</div>` : ''}
+    </div>`;
+  }).join('') : `<p class="muted">${esc(tr('ui.noAlerts'))}</p>`;
+  document.querySelectorAll('[data-approve]').forEach((b) => b.addEventListener('click', () => act(async () => {
+    b.disabled = true;
+    await api('POST', `/api/alerts/${b.dataset.approve}/approve`, { token });
+  })));
+
+  document.getElementById('zones').innerHTML = s.zones.map((z) =>
+    `<tr><td>${esc(name(z.name))}</td><td><b style="color:${z.openSos ? '#dc2626' : 'inherit'}">${z.openSos}</b></td></tr>`).join('');
+
+  document.getElementById('points').innerHTML = s.points.map((p) => `
+    <div style="margin-bottom:6px;${p.active ? '' : 'opacity:.5'}">
+      <div class="row" style="justify-content:space-between"><span>${esc(name(p.name))}${p.active ? '' : ' 🔒'}</span><b style="color:${pctColor(p.occupancyPct)}">${p.occupancyPct}%</b></div>
+      <div class="bar"><i style="width:${Math.min(100, p.occupancyPct)}%;background:${pctColor(p.occupancyPct)}"></i></div></div>`).join('');
+
+  document.getElementById('brigades').innerHTML = s.brigades.map((b) =>
+    `<tr><td>${esc(b.name)}</td><td>${esc(tr('brigade.' + b.status))}</td>
+     <td>${b.status !== 'available' ? `<button data-free="${b.id}">✓</button>` : ''}</td></tr>`).join('');
+  document.querySelectorAll('[data-free]').forEach((b) => b.addEventListener('click', () =>
+    act(() => api('POST', `/api/brigades/${b.dataset.free}/status`, { token, body: { status: 'available' } }))));
+
+  const simSel = document.getElementById('simPoint');
+  if (!simSel.options.length) simSel.innerHTML = s.points.filter((p) => p.active).map((p) => `<option value="${p.id}">${esc(name(p.name))}</option>`).join('');
+
+  drawMap(s);
+}
+
+function drawMap(s) {
+  if (!map) return;
+  Object.values(layers).forEach((l) => l.clearLayers());
+  for (const r of roads) {
+    if (r.closed) {
+      L.polyline([[r.from.lat, r.from.lng], [r.to.lat, r.to.lng]], { color: '#dc2626', weight: 4, dashArray: '6 6' })
+        .on('click', () => act(() => api('POST', `/api/roads/${r.id}/open`, { token }).then(refreshRoads))).addTo(layers.roads);
+    }
+  }
+  for (const z of s.zones) {
+    L.circle([z.lat, z.lng], { radius: 500, color: z.openSos ? '#dc2626' : '#94a3b8', weight: 1, fillOpacity: z.openSos ? .15 : .03 })
+      .bindTooltip(`${name(z.name)}: ${z.openSos} SOS`).addTo(layers.zones);
+  }
+  for (const p of s.points) {
+    L.circleMarker([p.lat, p.lng], { radius: p.active ? 11 : 6, color: p.active ? pctColor(p.occupancyPct) : '#9ca3af', fillOpacity: .8 })
+      .bindTooltip(`${name(p.name)} ${p.occupancyPct}%`).addTo(layers.points);
+  }
+  for (const o of s.sos) L.circleMarker([o.lat, o.lng], { radius: 4, color: '#dc2626', fillOpacity: 1 }).bindTooltip(`${tr('sos.' + o.type)}${o.note ? ': ' + o.note : ''}`).addTo(layers.sos);
+  for (const b of s.brigades) {
+    L.marker([b.lat, b.lng], { icon: L.divIcon({ html: b.kind === 'fire' ? '🚒' : b.kind === 'medical' ? '🚑' : '🛟', className: '', iconSize: [24, 24] }), opacity: b.status === 'available' ? 1 : .6 })
+      .bindTooltip(`${b.name} – ${tr('brigade.' + b.status)}`).addTo(layers.brigades);
+    if (b.target) L.polyline([[b.lat, b.lng], [b.target.lat, b.target.lng]], { color: '#2563eb', dashArray: '4 6' }).addTo(layers.brigades);
+  }
+}
+
+async function refreshRoads() { roads = await api('GET', '/api/roads'); snap && drawMap(snap); }
+
+// --- simulation controls (admin token needed) ---
+const sim = (fn) => () => act(async () => { await fn(); document.getElementById('simMsg').textContent = 'OK'; });
+document.getElementById('simSet').addEventListener('click', sim(async () => {
+  const id = document.getElementById('simPoint').value;
+  const pt = snap.points.find((p) => p.id === id);
+  const pct = Number(document.getElementById('simPct').value);
+  await api('POST', '/api/sim/occupancy', { token, body: { pointId: id, occupied: Math.round((pct / 100) * pt.capacity) } });
+}));
+document.getElementById('chaosOn').addEventListener('click', sim(() => api('POST', '/api/sim/chaos', { token, body: { externalDown: true } })));
+document.getElementById('chaosOff').addEventListener('click', sim(() => api('POST', '/api/sim/chaos', { token, body: { externalDown: false } })));
+document.getElementById('roadRandom').addEventListener('click', sim(async () => {
+  const open = roads.filter((r) => !r.closed);
+  const r = open[Math.floor(Math.random() * open.length)];
+  await api('POST', `/api/roads/${r.id}/close`, { token }); await refreshRoads();
+}));
+document.getElementById('reset').addEventListener('click', sim(async () => { await api('POST', '/api/sim/reset', { token }); await refreshRoads(); }));
+
+connect();
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "urban-crisis-evacuation-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Urban Crisis and Crowd Evacuation Engine - zero-dependency prototype (Node >= 20)",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js",
+    "demo": "node scripts/demo.js",
+    "load": "node scripts/loadtest.js"
+  }
+}
