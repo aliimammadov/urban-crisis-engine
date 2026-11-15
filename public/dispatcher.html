@@ -98,13 +98,22 @@
   #scPanel .sim:has(#simPoint) { grid-template-columns:minmax(0,1fr) 90px; }
   #scPanel .sim:has(#simPoint) button { grid-column:1 / -1; }
   .percentage { display:flex; align-items:center; gap:4px; }
-  main { align-items:flex-start; }
-  #mapbox { flex:none; height:clamp(440px,60vh,720px); }
+  /* app shell: the page itself never scrolls; panels scroll inside */
+  html, body { height:100%; } body { display:flex; flex-direction:column; overflow:hidden; }
+  header { flex:none; padding:10px 20px; } #protect { flex:none; }
+  main { flex:1 1 0; min-height:0; flex-wrap:nowrap; align-items:stretch; padding:12px 16px; gap:12px; }
+  .left, .right { flex:none; width:clamp(300px,24vw,380px); max-width:none; min-height:0; } .mid { flex:1 1 0; min-width:0; min-height:0; }
+  .tabcard { flex:1 1 0; min-height:0; display:flex; flex-direction:column; } .tabcard > .tabs { flex:none; } .tabcard > .pane { flex:1 1 0; min-height:0; overflow:auto; overscroll-behavior:contain; }
+  .tabcard > .pane:not([hidden]) { display:flex; flex-direction:column; gap:12px; } .tabcard > .pane > * { flex:none; }
+  .tabs button .count { margin-left:6px; } .tabs button .count.amber { background:#e8a100; }
+  .mid #mapbox { flex:1 1 0; min-height:0; height:auto; } .mid .kpis, .mid .tm { flex:none; } .mid .kpis { flex-wrap:nowrap; } .mid .kpi { flex:1 1 0; min-width:0; padding:10px 12px; }
+  .tabs { justify-content:space-between; padding:0 6px; } .tabs button { padding:13px 7px; }
   .replaybanner { top:auto; bottom:28px; max-width:86%; text-align:center; }
   #scPanel select { min-width:0; width:100%; text-overflow:ellipsis; }
   #scPanel .sim button { white-space:normal; overflow-wrap:anywhere; }
   #scPanel[open] > :not(summary) { animation:panel-in .2s ease-out; }
   @keyframes panel-in { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
+  @media (max-width:1000px) { html, body { height:auto; } body { display:block; overflow:auto; } main { flex-wrap:wrap; } .left, .right, .mid { width:auto; flex:1 1 100%; } .tabcard > .pane { max-height:70vh; } #mapbox { height:50vh; } }
   @media (max-width:600px) { main { padding:12px; } .left,.right { max-width:none; } .tm { grid-template-columns:auto auto 1fr; } .tmtrack { grid-column:1 / -1; grid-row:2; } .tm .tmlabel { grid-row:3; } .tm #tmLive { justify-self:end; } }
   @media (prefers-reduced-motion:reduce) { #scPanel[open] > :not(summary) { animation:none; } }
   ::view-transition-old(root), ::view-transition-new(root) { animation-duration:160ms; }
@@ -128,12 +137,19 @@
 <div id="protect" style="display:none;background:#b4231a;color:#fff;padding:10px 18px;font:600 14px var(--head)"></div>
 <main>
   <section class="col left">
-    <div class="h"><span><span id="tAlerts"></span><span class="count" id="alertCount">0</span></span><span class="small" id="tCritical"></span></div>
-    <div id="abuse"></div>
-    <div id="alerts" style="display:flex;flex-direction:column;gap:12px"></div>
-    <div class="card" id="pendCard" hidden><div class="lbl" id="tPend"></div><div class="small" id="pendHint" style="text-align:left;margin-bottom:8px"></div><div id="pending"></div></div>
-    <div class="card" id="quarCard" hidden><div class="lbl" id="tSusp"></div><div class="small" id="suspNote" style="text-align:left;margin-bottom:8px"></div><div class="feed" id="quar"></div></div>
-    <div class="card"><div class="lbl" id="tFeed"></div><div class="feed" id="feed"></div></div>
+    <div class="card tabcard">
+      <div class="tabs" role="tablist" id="tabsL">
+        <button role="tab" data-tab="alerts"><span id="tAlerts"></span><span class="count" id="alertCount">0</span></button><button role="tab" data-tab="feed" id="tabFeed"></button><button role="tab" data-tab="quar" id="tabQuar"><span id="tabQuarT"></span><span class="count amber" id="quarCount" style="display:none">0</span></button>
+      </div>
+      <div class="pane" data-pane="alerts" role="tabpanel">
+        <div class="small" id="tCritical" style="text-align:left"></div>
+        <div id="abuse"></div>
+        <div id="alerts" style="display:flex;flex-direction:column;gap:12px"></div>
+        <div class="card" id="pendCard" hidden><div class="lbl" id="tPend"></div><div class="small" id="pendHint" style="text-align:left;margin-bottom:8px"></div><div id="pending"></div></div>
+      </div>
+      <div class="pane" data-pane="feed" role="tabpanel" hidden><div class="lbl" id="tFeed" hidden></div><div class="feed" id="feed"></div></div>
+      <div class="pane" data-pane="quar" role="tabpanel" hidden><div id="quarCard"><div class="lbl" id="tSusp" hidden></div><div class="small" id="suspNote" style="text-align:left;margin-bottom:8px"></div><div class="feed" id="quar"></div></div></div>
+    </div>
   </section>
 
   <section class="col mid">
@@ -150,7 +166,7 @@
 
   <section class="col right">
     <div class="card tabcard">
-      <div class="tabs" role="tablist" id="tabs">
+      <div class="tabs" role="tablist" id="tabsR">
         <button role="tab" data-tab="brig" id="tabBrig"></button><button role="tab" data-tab="points" id="tabPoints"></button><button role="tab" data-tab="bc" id="tabBc"></button><button role="tab" data-tab="log" id="tabLog"></button><button role="tab" data-tab="sys" id="tabSys"></button>
       </div>
       <div class="pane" data-pane="brig" role="tabpanel"><div class="lbl" id="tBrigades" hidden></div><div id="brigades"></div></div>
@@ -226,7 +242,7 @@ function toast(msg, err = false) { const el = $('toast'); el.textContent = msg; 
 const act = async (fn) => { try { await fn(); } catch (e) { toast(e.message, true); } };
 
 function statics() {
-  $('tabBrig').textContent = tr('d.brigadesTitle'); $('tabPoints').textContent = tr('d.pointsTitle'); $('tabBc').textContent = tr('d.bc.title'); $('tabLog').textContent = tr('d.journal'); $('tabSys').textContent = tr('d.tab.system');
+  $('tabFeed').textContent = tr('d.tab.signals'); $('tabQuarT').textContent = tr('d.tab.suspicious'); $('tabBrig').textContent = tr('d.brigadesTitle'); $('tabPoints').textContent = tr('d.tab.points'); $('tabBc').textContent = tr('d.tab.broadcast'); $('tabLog').textContent = tr('d.tab.log'); $('tabSys').textContent = tr('d.tab.system');
   $('tAlerts').textContent = tr('d.alerts'); $('tCritical').textContent = tr('d.criticalFirst'); $('tFeed').textContent = tr('d.lastSignals');
   $('tPoints').textContent = tr('d.pointsTitle'); $('tBrigades').textContent = tr('d.brigadesTitle');
   $('tPend').textContent = tr('d.pending.title'); $('pendHint').textContent = tr('d.pending.hint');
@@ -249,21 +265,26 @@ function statics() {
 statics();
 
 // ---------------------------------------------------------------- right panel tabs
-function selectTab(id) {
-  const ids = [...document.querySelectorAll('#tabs [data-tab]')].map((b) => b.dataset.tab);
-  if (!ids.includes(id)) id = 'brig';
-  document.querySelectorAll('#tabs [data-tab]').forEach((b) => { const on = b.dataset.tab === id; b.setAttribute('aria-selected', on); b.tabIndex = on ? 0 : -1; });
-  document.querySelectorAll('.pane').forEach((p) => { p.hidden = p.dataset.pane !== id; });
-  try { localStorage.setItem('dtab', id); } catch { /* private mode */ }
+function initTabs(rootId, key, fallback) {
+  const root = $(rootId); const card = root.closest('.tabcard');
+  const btns = () => [...root.querySelectorAll('[data-tab]')];
+  const select = (id) => {
+    if (!btns().some((b) => b.dataset.tab === id)) id = fallback;
+    btns().forEach((b) => { const on = b.dataset.tab === id; b.setAttribute('aria-selected', on); b.tabIndex = on ? 0 : -1; });
+    card.querySelectorAll(':scope > .pane').forEach((p) => { p.hidden = p.dataset.pane !== id; });
+    try { localStorage.setItem(key, id); } catch { /* private mode */ }
+  };
+  root.addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) select(b.dataset.tab); });
+  root.addEventListener('keydown', (e) => {
+    if (!['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+    const bs = btns(); const i = bs.findIndex((b) => b.getAttribute('aria-selected') === 'true');
+    const n = bs[(i + (e.key === 'ArrowRight' ? 1 : bs.length - 1)) % bs.length]; select(n.dataset.tab); n.focus();
+  });
+  let saved = fallback; try { saved = localStorage.getItem(key) || fallback; } catch { /* ignore */ }
+  select(saved);
 }
-$('tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) selectTab(b.dataset.tab); });
-$('tabs').addEventListener('keydown', (e) => {
-  if (!['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
-  const bs = [...document.querySelectorAll('#tabs [data-tab]')]; const i = bs.findIndex((b) => b.getAttribute('aria-selected') === 'true');
-  const n = bs[(i + (e.key === 'ArrowRight' ? 1 : bs.length - 1)) % bs.length]; selectTab(n.dataset.tab); n.focus();
-});
-let savedTab = 'brig'; try { savedTab = localStorage.getItem('dtab') || 'brig'; } catch { /* ignore */ }
-selectTab(savedTab);
+initTabs('tabsR', 'dtab', 'brig');
+initTabs('tabsL', 'dtabL', 'alerts');
 
 // ---------------------------------------------------------------- login + stream
 function showLogin(msg = '') { $('login').classList.add('on'); $('loginErr').textContent = msg; $('user').value ||= 'dispatcher'; $('token').value = ''; ($('user').value ? $('token') : $('user')).focus(); }
@@ -354,7 +375,7 @@ $('pending').addEventListener('focusout', () => setTimeout(() => snap && renderP
 
 function renderQuarantine() {
   const q = snap.quarantined ?? [];
-  $('quarCard').hidden = !q.length;
+  $('quarCount').textContent = q.length; $('quarCount').style.display = q.length ? '' : 'none';
   $('quar').innerHTML = q.slice().reverse().slice(0, 8).map((s) => `<div><i style="background:#d68500"></i><span>${esc(tr('sos.' + s.type))} · ${esc(zoneName(s.districtId))} ${s.flags.map((f) => `<span class="flagtag">${esc(tr('d.flag.' + f))}</span>`).join(' ')}</span><button class="rel" data-release="${s.id}">${esc(tr('d.release'))}</button></div>`).join('');
   $('quar').querySelectorAll('[data-release]').forEach((b) => b.addEventListener('click', () => act(async () => { b.disabled = true; await api('POST', `/api/sos/${b.dataset.release}/release`, { token }); })));
 }
