@@ -54,6 +54,9 @@
   .mv { height:4px; background:var(--soft); border-radius:2px; margin-top:4px; overflow:hidden; } .mv i { display:block; height:100%; background:#0071e3; }
   .pick { display:flex; gap:8px; align-items:center; font-size:12.5px; color:var(--muted); } .pick select { flex:1; min-width:0; font:inherit; font-size:13px; padding:7px 8px; border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--ink); }
   .warnrow { background:#fff4de; color:#6b3f00; border-radius:10px; padding:8px 10px; font-size:12.5px; line-height:1.35; } .mtag { font-size:11px; font-weight:700; border-radius:999px; padding:1px 8px; background:#fff4de; color:#8a5a00; margin-left:4px; }
+  .pill.warn { background:#fff4de; color:#8a5a00; font-weight:600; } .pill .dotw { width:8px; height:8px; border-radius:50%; background:#e8a100; }
+  .rt { font-size:13px; } .rt .row { display:flex; justify-content:space-between; gap:10px; padding:5px 0; border-top:1px solid #f0f1f4; } .rt .row:first-child { border-top:0; } .rt .row span:first-child { color:var(--muted); }
+  .rt .srcs { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; } .rt .srcs span { background:var(--soft); border-radius:999px; padding:2px 10px; font-size:12px; font-weight:600; }
   .rel { border:1px solid var(--line); background:#fff; border-radius:8px; padding:3px 10px; font-size:12.5px; font-weight:600; }
   .kpis { display:flex; gap:12px; flex-wrap:wrap; } .kpi { flex:1 1 130px; background:#fff; border:1px solid var(--line); border-radius:16px; padding:12px 16px; } .kpi small { color:var(--muted); font-size:12px; } .kpi div { display:flex; align-items:baseline; gap:8px; } .kpi b { font:800 28px var(--head); letter-spacing:-0.04em; }
   #mapbox { position:relative; flex-grow:1; min-height:440px; border-radius:18px; overflow:hidden; border:1px solid var(--line); }
@@ -147,6 +150,7 @@
 
   <section class="col right">
     <div class="card"><div class="lbl" id="tPoints"></div><div id="points"></div></div>
+    <div class="card rt"><div class="lbl" id="tRouting"></div><div id="routing"></div></div>
     <div class="card"><div class="lbl" id="tBrigades"></div><div id="brigades"></div></div>
     <div class="card"><div class="lbl" id="tJournal"></div><div class="feed" id="journal"></div></div>
     <details class="card" id="scPanel" hidden><summary class="lbl" id="scSummary" style="cursor:pointer;margin:0"></summary>
@@ -157,7 +161,7 @@
       </div>
       <div class="sim" style="margin-top:8px"><button id="secMode" title=""></button></div>
       <div class="sim" style="margin-top:8px"><span id="simSpeedL" class="small"></span><select id="simSpeed"><option value="1">x1</option><option value="5">x5</option><option value="10">x10</option><option value="30">x30</option></select></div>
-      <div class="sim" style="margin-top:8px"><button id="chaosOn"></button><button id="chaosOff"></button><button id="roadRandom"></button><button id="reset"></button></div>
+      <div class="sim" style="margin-top:8px"><label class="small" id="simApiL" for="simApi"></label><select id="simApi"></select><button id="roadRandom"></button><button id="reset"></button></div>
     </details>
   </section>
 </main>
@@ -206,7 +210,8 @@ function statics() {
   $('tSusp').textContent = tr('d.suspicious'); $('suspNote').textContent = tr('d.suspiciousNote');
   $('scSummary').textContent = tr('d.scenarios'); $('tManual').textContent = tr('d.manual');
   $('loginTitle').textContent = tr('d.login.title'); $('loginSubmit').textContent = tr('d.login.submit'); $('token').placeholder = tr('d.login.token');
-  $('simSet').textContent = tr('d.sim.set'); $('chaosOn').textContent = tr('d.sim.apiDown'); $('chaosOff').textContent = tr('d.sim.apiUp');
+  $('simSet').textContent = tr('d.sim.set'); $('simApiL').textContent = tr('d.sim.api'); $('tRouting').textContent = tr('d.sim.api');
+  { const cur = $('simApi').value || snap?.chaos?.mode || 'ok'; $('simApi').innerHTML = ['ok', 'http503', 'slow', 'error'].map((m) => `<option value="${m}">${esc(tr('d.sim.api.' + m))}</option>`).join(''); $('simApi').value = cur; }
   $('roadRandom').textContent = tr('d.sim.closeRoad'); $('reset').textContent = tr('d.sim.reset');
   document.querySelectorAll('[data-i18n-aria]').forEach((el) => el.setAttribute('aria-label', tr(el.dataset.i18nAria)));
   $('bcSummary').textContent = tr('d.bc.title'); $('bcHistTitle').textContent = tr('d.bc.history'); $('bcSend').textContent = tr('d.bc.send');
@@ -245,7 +250,8 @@ function render() {
   if (!snap) return;
   checkReplayAlerts();
   const apiDown = snap.chaos.externalDown;
-  $('apiPill').className = `pill ${apiDown ? 'bad' : 'ok'}`; $('apiPill').textContent = apiDown ? tr('d.apiDown') : tr('d.apiOk');
+  renderRouting(apiDown);
+  if (snap.chaos?.mode && document.activeElement !== $('simApi')) $('simApi').value = snap.chaos.mode;
   renderAbuse(); renderAlerts(); renderFeed(); renderQuarantine(); renderKpis(); renderSide(); renderBcHistory(); renderJournal(); drawMap();
   if (bcBuiltFor !== state.lang + snap.points.length + snap.zones.length) buildBcForm();
   if (replay) showFrame(replay.i);
@@ -471,6 +477,31 @@ function renderSide() {
   const sel = $('simPoint'); if (!sel.options.length) sel.innerHTML = snap.points.filter((p) => p.active).map((p) => `<option value="${p.id}">${esc(name(p.name))}</option>`).join('');
 }
 
+// ---------------------------------------------------------------- external map API health (circuit breaker)
+function routingErr(br) {
+  const e = br.lastError;
+  if (!e) return '';
+  const key = e.kind === 'http' ? 'd.routing.err.http' : 'd.routing.err.' + (['timeout', 'network'].includes(e.kind) ? e.kind : 'error');
+  return fmt(key, { status: e.status ?? '' });
+}
+function renderRouting(apiDown) {
+  const rt = snap.deps?.routing;
+  const pill = $('apiPill');
+  if (!rt) { pill.className = `pill ${apiDown ? 'bad' : 'ok'}`; pill.textContent = apiDown ? tr('d.apiDown') : tr('d.apiOk'); return; }
+  const br = rt.breaker;
+  const left = br.retryInMs ? Math.max(0, Math.ceil((br.retryInMs - (Date.now() - snapAt)) / 1000)) : 0;
+  const degraded = rt.mode === 'offline-fallback';
+  pill.className = `pill ${degraded ? 'warn' : 'ok'}`;
+  pill.innerHTML = degraded ? `<span class="dotw"></span>${esc(tr('d.routing.degraded'))}${br.state === 'open' ? ` · ${esc(fmt('d.routing.retry', { s: left }))}` : ''}` : esc(tr('d.apiOk'));
+  pill.title = degraded ? routingErr(br) : '';
+  $('routing').innerHTML = `
+    <div class="row"><span>${esc(tr('d.sim.api'))}</span><b>${esc(tr('d.routing.state.' + br.state))}</b></div>
+    ${br.lastError && (degraded || br.state !== 'closed') ? `<div class="row"><span>⚠</span><span>${esc(routingErr(br))}</span></div>` : ''}
+    ${br.state === 'open' ? `<div class="row"><span>${esc(fmt('d.routing.retry', { s: left }))}</span><span></span></div>` : ''}
+    <div class="row"><span>${esc(fmt('d.routing.cache', { n: rt.cacheSize }))}</span><span>${br.failures}/${br.calls} ✗</span></div>
+    <div class="srcs">${['external', 'cache', 'matrix', 'local'].map((k) => `<span>${esc(tr('d.routing.src.' + k))}: ${rt.served[k] ?? 0}</span>`).join('')}</div>`;
+}
+
 // ---------------------------------------------------------------- mass notification (dispatcher -> citizens)
 const BC_TYPES = ['evacuate', 'shelter', 'avoid_area', 'all_clear', 'custom'];
 const topAlert = () => snap?.alerts.find((a) => a.status === 'open');
@@ -537,7 +568,7 @@ function renderJournal() {
 }
 
 // brigades move: refresh countdowns/progress once a second while any of them is on the road
-setInterval(() => { if (snap && snap.brigades.some((b) => b.etaSec != null) && !replay) renderSide(); }, 1000);
+setInterval(() => { if (snap && snap.brigades.some((b) => b.etaSec != null) && !replay) renderSide(); if (snap?.deps?.routing.breaker.state === 'open') renderRouting(false); }, 1000);
 
 // ---------------------------------------------------------------- map
 function ensureMap() {
@@ -570,8 +601,7 @@ function drawMap() {
 // ---------------------------------------------------------------- simulation (admin token)
 const sim = (fn) => () => act(fn);
 $('simSet').addEventListener('click', sim(async () => { const pt = snap.points.find((p) => p.id === $('simPoint').value); await api('POST', '/api/sim/occupancy', { token, body: { pointId: pt.id, occupied: Math.round((Number($('simPct').value) / 100) * pt.capacity) } }); }));
-$('chaosOn').addEventListener('click', sim(() => api('POST', '/api/sim/chaos', { token, body: { externalDown: true } })));
-$('chaosOff').addEventListener('click', sim(() => api('POST', '/api/sim/chaos', { token, body: { externalDown: false } })));
+$('simApi').addEventListener('change', sim(() => api('POST', '/api/sim/chaos', { token, body: { mode: $('simApi').value } })));
 $('roadRandom').addEventListener('click', sim(async () => { const open = roads.filter((r) => !r.closed); const r = open[Math.floor(Math.random() * open.length)]; await api('POST', `/api/roads/${r.id}/close`, { token }); }));
 $('reset').addEventListener('click', sim(() => api('POST', '/api/sim/reset', { token })));
 $('simSpeed').addEventListener('change', sim(async () => { rules = await api('POST', '/api/sim/rules', { token, body: { brigadeTimeScale: Number($('simSpeed').value) } }); }));

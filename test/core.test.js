@@ -151,14 +151,16 @@ test('evacuation: external routing API down => fallback source, still works', as
   const app = setup();
   app.store.chaos.externalDown = true;
   const r = await app.evacuation.recommend(NASIMI);
-  assert.equal(r.points.find((p) => p.id === r.recommendedPointId).route.source, 'fallback');
+  const route = r.points.find((p) => p.id === r.recommendedPointId).route;
+  assert.ok(['cache', 'matrix', 'local'].includes(route.source), route.source);
+  assert.equal(r.routing.degraded, true);
 });
 
 test('evacuation: slow external API times out => fallback', async () => {
   const app = setup({ routingTimeoutMs: 50 });
   app.store.chaos.externalLatencyMs = 400;
   const r = await app.evacuation.recommend(NASIMI);
-  assert.equal(r.points[0].route.source, 'fallback');
+  assert.ok(['cache', 'matrix', 'local'].includes(r.points[0].route.source), r.points[0].route.source);
 });
 
 test('evacuation: invalid coordinates rejected, district fallback works', async () => {

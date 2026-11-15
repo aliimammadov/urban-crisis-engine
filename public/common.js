@@ -2,9 +2,17 @@
 export const state = { lang: localStorage.getItem('lang') || 'az', messages: {} };
 
 export async function loadLang(lang) {
-  const r = await fetch(`/api/i18n/${lang}`);
-  if (!r.ok) throw new Error(r.statusText);
-  const messages = (await r.json()).messages;
+  let messages;
+  try {
+    const r = await fetch(`/api/i18n/${lang}`);
+    if (!r.ok) throw new Error(r.statusText);
+    messages = (await r.json()).messages;
+    try { localStorage.setItem(`i18n:${lang}`, JSON.stringify(messages)); } catch { /* storage full/blocked */ }
+  } catch (err) {
+    // server unreachable: use the last copy we saved so the app still opens (offline / backup mode)
+    try { messages = JSON.parse(localStorage.getItem(`i18n:${lang}`)); } catch { messages = null; }
+    if (!messages) throw err;
+  }
   state.lang = lang;
   localStorage.setItem('lang', lang);
   state.messages = messages;

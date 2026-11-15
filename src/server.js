@@ -1,5 +1,8 @@
 import { networkInterfaces } from 'node:os';
 import { createApp } from './app.js';
+import { installProcessGuards } from './guards.js';
+
+installProcessGuards();
 
 const port = Number(process.env.PORT) || 3000;
 const num = (v) => (v === undefined ? undefined : Number(v));

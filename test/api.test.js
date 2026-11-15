@@ -99,7 +99,8 @@ test('external API outage (chaos) keeps citizen endpoint working', async () => {
   const r = await call('GET', '/api/evacuation?lat=40.4093&lng=49.8330');
   assert.equal(r.status, 200);
   const rec = r.json.points.find((p) => p.id === r.json.recommendedPointId);
-  assert.equal(rec.route.source, 'fallback');
+  assert.ok(['cache', 'matrix', 'local'].includes(rec.route.source), rec.route.source);
+  assert.equal(r.json.routing.degraded, true);
   await call('POST', '/api/sim/reset', { token: 'admin-demo' });
 });
 

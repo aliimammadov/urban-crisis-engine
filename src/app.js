@@ -7,6 +7,7 @@ import * as seed from './seed.js';
 import { AppError } from './errors.js';
 import { Store, SOS_TYPES } from './store.js';
 import { RoadGraph, RoutingService } from './routing.js';
+import { CircuitBreaker } from './resilience.js';
 import { EvacuationService } from './evacuation.js';
 import { CrisisEngine } from './crisis.js';
 import { Auth } from './auth.js';
@@ -42,7 +43,8 @@ export function createApp({
   auth = new Auth(),
   rules = {},
   limits = {},
-  routingTimeoutMs = 700,
+  routingTimeoutMs = 1500, // hard deadline for the external map API (an answer slower than 5 s counts as an outage anyway)
+  breaker: breakerOpts = {},
   cancelWindowMs,
   tokenSecret,
   tickMs = 5000,
@@ -54,7 +56,8 @@ export function createApp({
 } = {}) {
   const store = new Store(data, { now, cancelWindowMs });
   const graph = new RoadGraph([...data.districts, ...data.points]);
-  const routing = new RoutingService(graph, store.chaos, { timeoutMs: routingTimeoutMs });
+  const breaker = new CircuitBreaker({ now, ...breakerOpts });
+  const routing = new RoutingService(graph, store.chaos, { timeoutMs: routingTimeoutMs, now, breaker });
   const evacuation = new EvacuationService(store, routing);
   const crisis = new CrisisEngine(store, rules, { graph });
   const sessions = new Sessions(tokenSecret);
@@ -68,8 +71,16 @@ export function createApp({
     const snap = crisis.decorate(store.snapshot());
     snap.decisions = audit.recent(12);
     snap.broadcasts = broadcasts.recent(8);
+    snap.deps = { routing: routing.status() };
     return snap;
   };
+  // The routing circuit changing state is operationally important: log it and refresh dashboards immediately.
+  breaker.on('transition', (t) => {
+    if (t.to === 'open' && t.from !== 'open') audit.record({ actor: 'system', action: 'routing.degraded', details: { reason: breaker.stats.lastError?.kind ?? null, status: breaker.stats.lastError?.status ?? null } });
+    if (t.to === 'closed') audit.record({ actor: 'system', action: 'routing.recovered', details: {} });
+    store.emit('change', 'routing');
+  });
+  store.on('change', (kind) => { if (kind === 'reset') { routing.reset(); } });
   store.on('alert', (a) => audit.record({ actor: 'system', action: 'alert.created', target: a.id, details: { type: a.type, level: a.level, priority: a.priority ?? null } }));
   store.on('change', (kind) => { if (kind === 'reset') broadcasts.clear(); });
 
@@ -104,10 +115,10 @@ export function createApp({
     pending = null;
     if (!clients.size) return;
     const payload = `event: snapshot\ndata: ${JSON.stringify(snapshot())}\n\n`;
-    for (const res of clients) res.write(payload);
+    for (const res of clients) { try { res.write(payload); } catch { clients.delete(res); } } // a dead socket must never break the loop
   };
   store.on('change', () => { if (!pending) pending = setTimeout(broadcast, 150); }); // coalesce bursts
-  const heartbeat = setInterval(() => { for (const res of clients) res.write(': ping\n\n'); }, 15_000);
+  const heartbeat = setInterval(() => { for (const res of clients) { try { res.write(': ping\n\n'); } catch { clients.delete(res); } } }, 15_000);
   heartbeat.unref();
 
   // ---- routes --------------------------------------------------------------
@@ -120,7 +131,7 @@ export function createApp({
   const spec = buildOpenApi();
   route('GET', '/api/openapi.json', () => spec);
   route('GET', '/api/docs', () => ({ raw: true, status: 200, contentType: 'text/html; charset=utf-8', body: renderDocs() }));
-  route('GET', '/api/health', () => ({ ok: true, time: now() }));
+  route('GET', '/api/health', () => ({ ok: true, time: now(), mode: routing.status().mode, dependencies: { routing: routing.status() } }));
   route('GET', '/api/i18n/:lang', (c) => ({ lang: resolveLang(c.params.lang), messages: dict[resolveLang(c.params.lang)] }));
   route('GET', '/api/config', () => ({ sosTypes: SOS_TYPES, languages: Object.keys(dict), rules: crisis.rules, sms: { number: smsNumber } }));
   route('GET', '/api/districts', () => store.districts);
@@ -205,11 +216,10 @@ export function createApp({
 
   // admin simulation / ops
   route('POST', '/api/sim/occupancy', { perm: '*', audit: 'sim.occupancy', details: (o) => ({ pointId: o.id, occupied: o.occupied }) }, (c) => store.setOccupancy(c.body.pointId, Number(c.body.occupied)));
-  route('POST', '/api/sim/chaos', { perm: '*', audit: 'sim.chaos', details: (o) => ({ externalDown: o.externalDown, externalLatencyMs: o.externalLatencyMs }) }, (c) => {
-    if (typeof c.body.externalDown === 'boolean') store.chaos.externalDown = c.body.externalDown;
-    if (Number.isFinite(c.body.externalLatencyMs)) store.chaos.externalLatencyMs = Math.max(0, c.body.externalLatencyMs);
-    store.emit('change', 'chaos');
-    return store.chaos;
+  route('POST', '/api/sim/chaos', { perm: '*', audit: 'sim.chaos', details: (o) => ({ mode: o.mode, externalDown: o.externalDown, externalLatencyMs: o.externalLatencyMs }) }, (c) => {
+    const chaos = store.setChaos({ mode: c.body.mode, externalDown: c.body.externalDown, externalLatencyMs: c.body.externalLatencyMs });
+    if (chaos.mode === 'ok') breaker.allowProbeNow(); // the API is back: probe at once instead of waiting out the timer
+    return chaos;
   });
   route('POST', '/api/sim/rules', { perm: '*', audit: 'sim.rules', details: (_o, body) => ({ keys: Object.keys(body ?? {}) }) }, (c) => crisis.setRules(c.body));
   route('GET', '/api/rules', { perm: 'dashboard' }, () => crisis.rules);
@@ -219,7 +229,7 @@ export function createApp({
   };
   route('POST', '/api/sim/reset', { perm: '*', audit: 'sim.reset' }, () => { resetAll(); return { ok: true }; });
   route('GET', '/api/sim/scenarios', { perm: '*' }, () => SCENARIO_NAMES);
-  route('POST', '/api/sim/scenario', { perm: '*', audit: 'sim.scenario', details: (o) => ({ name: o.name }) }, (c) => runScenario(String(c.body.name ?? ''), { store, graph, resetAll, sms, broadcasts }));
+  route('POST', '/api/sim/scenario', { perm: '*', audit: 'sim.scenario', details: (o) => ({ name: o.name }) }, (c) => runScenario(String(c.body.name ?? ''), { store, graph, resetAll, sms, broadcasts, breaker }));
 
   // ---- decision journal ----
   route('GET', '/api/decisions', { perm: 'dashboard' }, (c) => ({ decisions: audit.recent(Number(c.url.searchParams.get('limit')) || 30) }));
@@ -356,5 +366,5 @@ export function createApp({
   const server = http.createServer(handler);
   server.keepAliveTimeout = 5000;
   const routeTable = () => routes.map((r) => ({ method: r.method, path: r.path, perm: r.opts.perm ?? null }));
-  return { server, store, graph, history, audit, broadcasts, sms, routeTable, routing, evacuation, crisis, auth, handler };
+  return { server, store, graph, history, audit, broadcasts, sms, routing, breaker, routeTable, routing, evacuation, crisis, auth, handler };
 }

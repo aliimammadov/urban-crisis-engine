@@ -89,6 +89,11 @@ test('dynamic key families added with the product features are translated (journ
   const fam = {
     'bc.type.': ['evacuate', 'shelter', 'avoid_area', 'all_clear', 'custom'], 'bc.severity.': ['critical', 'warning', 'info'],
     'd.bc.': ['active', 'cancelled', 'expired'], 'brigade.': ['returning'], 'role.': ['system', 'dispatcher', 'admin', 'observer'],
+    'brigade.kind.': ['fire', 'rescue', 'medical', 'accessible_transport'], 'd.match.': ['exact', 'secondary', 'any', 'special'],
+    // external map API outage: notices for citizens, health panel for dispatchers
+    'm.degraded.': ['title', 'body', 'cache', 'matrix', 'local', 'clientOffline', 'recovered'],
+    'd.routing.err.': ['http', 'timeout', 'network', 'circuit_open', 'error'], 'd.routing.state.': ['closed', 'open', 'half_open'],
+    'd.routing.src.': ['external', 'cache', 'matrix', 'local'], 'd.sim.api.': ['ok', 'http503', 'slow', 'error'], 'audit.routing.': ['degraded', 'recovered'],
   };
   for (const [p, vals] of Object.entries(fam)) for (const v of vals) for (const lang of ['az', 'en']) assert.ok(dict[lang][p + v], `${lang}: ${p}${v}`);
   for (const t of ['evacuate', 'shelter', 'avoid_area', 'all_clear']) for (const part of ['title', 'body']) for (const lang of ['az', 'en']) assert.ok(dict[lang][`bc.${t}.${part}`], `${lang}: bc.${t}.${part}`);

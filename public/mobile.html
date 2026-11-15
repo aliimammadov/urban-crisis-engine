@@ -126,6 +126,9 @@
   #bcOverlay .safesheet { border-top:8px solid #ff3b30; } #bcOverlay .tag { display:inline-block; background:#fdeceb; color:#b4231a; border-radius:999px; padding:3px 12px; font:800 12px var(--head); letter-spacing:.06em; text-transform:uppercase; align-self:flex-start; }
   .smscard { border:1.5px dashed #c9ccd4; border-radius:16px; padding:12px 14px; display:flex; flex-direction:column; gap:8px; font-size:13.5px; color:#3d4350; } .smscard b { font:800 14px var(--head); }
   .smslink { display:inline-flex; align-items:center; justify-content:center; height:46px; border-radius:14px; background:#0b0b0f; color:#fff; font:700 15px var(--head); text-decoration:none; }
+  .degbar { border-radius:16px; padding:12px 14px; display:flex; flex-direction:column; gap:4px; background:#2b2f3a; color:#fff; font-size:13px; line-height:1.4; }
+  .degbar b { font:800 14.5px var(--head); letter-spacing:-0.02em; display:flex; align-items:center; gap:8px; } .degbar small { color:#cdd3df; font-size:12.5px; } .degbar .dot { background:#ffb020; }
+  #degHome { margin-top:12px; }
   [hidden] { display:none !important; }
   @media (min-width:431px) { #app { box-shadow:0 0 0 1px var(--line); } }
 </style>
@@ -143,6 +146,7 @@
         <span><b id="safeLabel"></b><small id="safeHint"></small></span>
       </button>
     </div>
+    <div id="degHome"></div>
     <div id="bcBanners"></div>
     <h1 id="hTitle"></h1>
     <p class="lead" id="hLead"></p>
@@ -264,7 +268,7 @@ const LANGS = ['az', 'en', 'ru'];
 await loadLang(localStorage.getItem('lang') || 'az');
 ensureSession().catch(() => {}); // signed device identity; retried below if we start offline
 setInterval(() => ensureSession().catch(() => {}), 60_000);
-const districts = await api('GET', '/api/districts').catch(() => []);
+const districts = await api('GET', '/api/districts').then((d) => { lsSet('districts', d); return d; }).catch(() => lsGet('districts', []));
 
 function renderStatic() {
   $('hTitle').textContent = tr('m.whatHappens');
@@ -351,20 +355,46 @@ if (navigator.geolocation) {
 }
 
 // ------------------------------------------------------------------ evacuation data
+// Offline / backup-route mode ----------------------------------------------------------------------------
+let clientOfflineSince = null;           // set when the server itself is unreachable and we show saved data
+let savedAt = null;                      // timestamp of the saved answer we restored at start-up
+const isDegraded = () => !!(rec?.routing?.degraded || clientOfflineSince != null);
+function degradedBar() {
+  if (!isDegraded()) return '';
+  const r = rec?.routing ?? {};
+  const lines = [];
+  if (clientOfflineSince != null) lines.push(fmtT('m.degraded.clientOffline', { min: Math.max(0, Math.round((Date.now() - clientOfflineSince) / 60000)) }));
+  else {
+    if (r.sources?.includes('cache')) lines.push(fmtT('m.degraded.cache', { min: Math.max(0, Math.round((r.cacheAgeSec ?? 0) / 60)) }));
+    if (r.sources?.includes('matrix')) lines.push(tr('m.degraded.matrix'));
+    if (r.sources?.includes('local')) lines.push(tr('m.degraded.local'));
+  }
+  return `<div class="degbar" role="status" aria-live="polite"><b><span class="dot"></span>${esc(tr('m.degraded.title'))}</b><span>${esc(tr('m.degraded.body'))}</span>${lines.map((l) => `<small>${esc(l)}</small>`).join('')}</div>`;
+}
+function renderDegraded() { $('degHome').innerHTML = degradedBar(); }
+
 async function refresh() {
   if (!pos) return;
   try {
-    rec = await api('GET', `/api/evacuation?lat=${pos.lat}&lng=${pos.lng}${isPriority() ? '&accessible=1' : ''}`);
+    const fresh = await api('GET', `/api/evacuation?lat=${pos.lat}&lng=${pos.lng}${isPriority() ? '&accessible=1' : ''}`);
+    const wasDegraded = isDegraded();
+    rec = fresh; clientOfflineSince = null;
+    lsSet('lastRec', { rec, at: Date.now() }); // our own "last cached route" for when the network or server is gone
     const roads = await api('GET', '/api/roads').catch(() => null);
     if (roads) window.__roads = roads;
+    if (wasDegraded && !isDegraded()) toast(tr('m.degraded.recovered'));
     renderAll();
     pollBroadcasts();
-  } catch { /* keep last data when offline */ }
+  } catch {
+    // keep what we have and say so: the citizen keeps a usable (older) route instead of an empty screen
+    if (rec && clientOfflineSince == null) clientOfflineSince = savedAt ?? Date.now();
+    renderAll();
+  }
 }
 setInterval(refresh, 5000);
 const bestPoint = () => rec?.points.find((p) => p.id === rec.recommendedPointId) ?? null;
 
-function renderAll() { renderHomeRow(); renderRoute(); renderBroadcasts(); if (app.dataset.screen === 'sent') renderSent(); }
+function renderAll() { renderHomeRow(); renderRoute(); renderDegraded(); renderBroadcasts(); if (app.dataset.screen === 'sent') renderSent(); }
 
 function renderHomeRow() {
   const b = bestPoint(); const sub = $('rowSub');
@@ -394,13 +424,13 @@ function renderRoute() {
   ban.className = `float ${reasons.length ? 'banner' : ''}`;
   if (!rec) { sheet.innerHTML = '<div class="grab"></div>'; return; }
   $('routeTitle').textContent = rec.accessible ? tr('m.accessibleRoute') : tr('m.routeTitle');
-  if (!b) { sheet.innerHTML = `<div class="grab"></div><div class="banner">${esc(rec.noAccessibleRoute ? tr('m.noAccessible') : tr('ui.noSafePoint'))}</div>`; drawMap(); return; }
+  if (!b) { sheet.innerHTML = `<div class="grab"></div>${degradedBar()}<div class="banner">${esc(rec.noAccessibleRoute ? tr('m.noAccessible') : tr('ui.noSafePoint'))}</div>`; drawMap(); return; }
   const others = rec.points.filter((p) => p.id !== b.id).slice(0, 2);
-  sheet.innerHTML = `<div class="grab"></div>
+  sheet.innerHTML = `<div class="grab"></div>${degradedBar()}
     <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px">
       <div style="min-width:0"><div class="eyebrow">● ${esc(rec.accessible ? tr('m.nearestAccessible') : tr('m.nearestSafe'))}</div><div class="pname">${esc(name(b.name))}</div><div class="psub">${b.route.distanceM} ${esc(tr('ui.meters'))} · ${b.occupancyPct}% · ${esc(tr('m.spaceLeft'))}</div>
         ${rec.accessible ? `<div class="accrow" style="margin-top:6px"><b>♿ ${esc(tr('m.accessibleRoute'))}</b>${(b.access ?? []).map((a) => `<span>${esc(tr('acc.' + a))}</span>`).join('')}</div><div class="psub">${esc(tr('m.accessibleOnly'))}</div>` : ''}</div>
-      <div class="eta"><b>${b.route.etaMin}</b><span>${esc(rec.accessible ? tr('ui.eta') : tr('m.walkMin'))}</span></div></div>
+      <div class="eta"><b>${isDegraded() ? '≈ ' : ''}${b.route.etaMin}</b><span>${esc(rec.accessible ? tr('ui.eta') : tr('m.walkMin'))}</span></div></div>
     <div class="bar"><i style="width:${Math.min(100, b.occupancyPct)}%;background:${pctColor(b.occupancyPct)}"></i></div>
     <div class="btnrow"><a class="primary" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${b.lat},${b.lng}&travelmode=walking">${svg(NAV, '#fff', 20, 2.2)}${esc(tr('m.navigate'))}</a>
       <button class="secondary" id="heading">${esc(tr('ui.checkin'))}</button></div>
@@ -677,7 +707,12 @@ async function confirmSafe() {
   } catch (e) { toast(e.message, true); setThumb(0, true); }
 }
 
+{ // cold start with no network/server: show the last saved answer, clearly flagged
+  const saved = lsGet('lastRec', null);
+  if (saved?.rec && Date.now() - saved.at < 6 * 3600_000) { rec = saved.rec; savedAt = saved.at; if (!navigator.onLine) clientOfflineSince = saved.at; }
+}
 renderStatic();
+if (rec) renderAll();
 if (current) { app.dataset.prev = 'sent'; go('sent'); pollSos(); }
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 </script>

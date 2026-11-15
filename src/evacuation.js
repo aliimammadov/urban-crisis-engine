@@ -91,6 +91,7 @@ export class EvacuationService {
       rerouted,
       noSafePoint: !recommended,
       accessible,
+      routing: this.routing.summarize(routes),
       noAccessibleRoute: accessible && !recommended, // no step-free route to an accessible point: transport must come to the citizen
       needsTransport: accessible,
       points,

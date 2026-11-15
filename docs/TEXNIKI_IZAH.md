@@ -57,6 +57,28 @@ public/ (vanilla JS + Leaflet)  ──HTTP / SSE──▶  src/app.js (marşrutl
 ### 5.2 Marşrutlaşdırma və yenidən marşrut (`routing.js`, `evacuation.js`)
 Yol şəbəkəsi sintetikdir: rayon və məntəqə mərkəzlərindən minimal örtük ağacı (bağlılığı zəmanət verir) + hər nöqtə üçün ən yaxın 3 qonşu (ehtiyat yollar). Dijkstra bağlı yolları atlayır, canlı tıxac əmsalını çəkiyə vurur. Vətəndaşın ətrafındakı 5 məntəqə üçün marşrut hesablanır. "Dolu" (≥90%) və ya əlçatmaz olanlar tövsiyədən çıxarılır, yenidən marşrut səbəbi (`POINT_FULL`, `ROAD_BLOCKED`, `POINT_FILLING_FAST`) vətəndaşa göstərilir.
 
+### 5.2.1 Xarici xəritə/marşrut API-sinin sıradan çıxması (`resilience.js`, `routing.js`, `guards.js`)
+Xarici API **HTTP 503** qaytaranda, şəbəkə xətası verəndə və ya **5 saniyədən gec** cavab verəndə sistem çökmür və xidmət göstərməyə davam edir. Hər marşrut sorğusu üçün pillələr:
+
+| Pillə | Mənbə | Nə vaxt |
+|---|---|---|
+| `external` | Canlı xarici API (tıxac nəzərə alınır) | Normal. Sərt müddət limiti 1,5 san. (5 san.-lik nasazlıq həddindən xeyli aşağı), cavab hər uğurlu çağırışda **keşlənir** |
+| `cache` | Eyni iki düyün arasında **son uğurlu marşrut** | Yalnız marşrutun hər seqmenti hələ də açıqdırsa (və əlçatan rejimdə pilləsizdirsə) və 15 dəq.-dən köhnə deyilsə |
+| `matrix` | **Statik koordinat matrisi**: bütün yol şəbəkəsi üçün başlanğıcda hesablanmış (Floyd–Warshall) ən qısa yollar. Testlə hər 441 cüt üçün canlı axtarışla eyni nəticə verdiyi sübut olunub | Eyni yoxlama: cari bağlı yollar |
+| `local` | Yerli yol qrafında canlı axtarış (cari bağlı yollar və pilləsizlik nəzərə alınır) | Yuxarıdakılar yararsızdırsa |
+
+Heç bir pillə yol tapmırsa nöqtə "əlçatmaz" işarələnir. **`route()` heç vaxt exception atmır**: hər pillə ayrıca qorunub, birindəki xəta növbətiyə keçir, hamısı uğursuz olsa belə cavab qaytarılır.
+
+**Dövrə kəsici (Circuit Breaker).** `closed` → ardıcıl 3 uğursuzluqdan sonra `open`: xarici API-yə **heç sorğu getmir** (cavab ani, gözləmə yoxdur). 10 san. sonra `half_open`: **yalnız bir** sınaq sorğusu keçir. Uğurlu olsa `closed`, uğursuz olsa yenidən `open` və gözləmə iki dəfə artır (30 san.-yə qədər). Eyni anda gələn uğursuzluqlar kəsicini bir dəfə açır, gec gələnlər gözləməni uzatmır. Gec cavab verən (taymaut olmuş) çağırışın sonradan rədd edilməsi "unhandled rejection" yaratmır (testlə yoxlanılır).
+
+**İstifadəçiyə bildiriş.** Evakuasiya cavabında `routing: { mode: 'offline-fallback', degraded, sources, reason, cacheAgeSec }` var. Mobil tətbiq **"Oflayn / Ehtiyat marşrut rejimində işləyir"** banneri göstərir (ana ekranda və marşrut ekranında), səbəbi izah edir ("son keşlənmiş marşrut (N dəq əvvəl)", "yerli statik koordinat matrisi", "yerli yol qrafı"), ETA-nı "≈" ilə işarələyir. Xidmət bərpa olunanda banner özü yox olur və "Xəritə xidməti bərpa olundu" bildirişi çıxır. Server tamam əlçatmaz olanda (və ya telefon oflayndırsa) service worker səhifəni, tətbiq isə **son saxlanmış tərcümələri, rayonları və marşrutu** göstərir: "Şəbəkə yoxdur. Son yadda saxlanmış məlumat göstərilir".
+
+**Dispetçer.** Başlıqdakı pill "Oflayn / ehtiyat marşrut rejimi · növbəti yoxlama N san." göstərir. Sağ sütunda "Xarici API" kartı: kəsicinin vəziyyəti, son xətanın növü (HTTP 503 / cavab müddəti aşıldı / şəbəkə xətası), keşdəki marşrut sayı, mənbələr üzrə xidmət sayı. Kəsicinin açılması və bərpası qərar jurnalına avtomatik düşür. `/api/health` asılılıqların vəziyyətini verir.
+
+**Proses səviyyəsi.** `guards.js`: gözlənilməyən `unhandledRejection` / `uncaughtException` loglanır, sayılır və proses dayanmır. SSE yayımında ölü soket digər istifadəçilərə mane olmur.
+
+**Test üçün.** Admin panelindəki "Xarici API" seçimi (`POST /api/sim/chaos {mode}`): `ok`, `http503`, `slow` (cavab 6 san.-dən sonra), `error` (şəbəkə xətası). `ok` seçiləndə kəsici dərhal sınaq sorğusu göndərir (real kəsici öz taymerini gözləyərdi, bu demo üçün rahatlıqdır). Ssenarilər: `api_outage` (503), `api_slow`, `api_recover`.
+
 ### 5.3 Proaktiv proqnoz (`store.js`, `crisis.js`, `evacuation.js`)
 Hər məntəqə üçün son 5 dəqiqənin nümunələrindən **dolma sürəti** (nəfər/dəq) hesablanır (ən azı 60 san. məlumat tələb olunur). Cari sürətlə 10 dəqiqə ərzində 95%-ə çatacaqsa, **95%-dən əvvəl** amber xəbərdarlıq yaranır ("~4 dəq-dən sonra 95%-i keçəcək"). Təsdiq yalnız ehtiyat məntəqəni açır (briqada göndərmir). Doluluq 95%-i keçəndə amber qırmızı ilə əvəzlənir. Vətəndaş tərəfdə: yaxın görünən, amma **vətəndaş çatanda dolacaq** məntəqə (`projectedPct ≥ 90%`) tövsiyədə geri salınır.
 
@@ -119,7 +141,7 @@ Dizayn istiqaməti: DevLink-in təmiz dili (`#0071e3`, Plus Jakarta Sans/Inter, 
 - Dispetçer: təsdiqdən əvvəl nəticə önbaxışı, 10 san. geri qaytarma, karantin siyahısı + "Burax", hücum/artım xəbərdarlığı, ssenari paneli, zaman maşını.
 
 ## 7. Keyfiyyət və test
-- **367 açar/dil, 158 avtomatik test** (`npm test`, ~0,5 san.): alqoritm sərhəd halları (dəqiq 95%, eyni şəxsin təkrar SOS-u, 5 dəqiqədən köhnə SOS), idempotentlik, geri qaytarma, marşrut ehtiyatı, auth/rollar, sürət limiti, saxta SOS ssenariləri, real kütləvi hadisədə heç kimin bloklanmaması, OpenAPI ilə real marşrut cədvəlinin uyğunluğu, dillərin eyni açar dəstinə malik olması.
+- **402 açar/dil, 183 avtomatik test** (`npm test`, ~0,5 san.): alqoritm sərhəd halları (dəqiq 95%, eyni şəxsin təkrar SOS-u, 5 dəqiqədən köhnə SOS), idempotentlik, geri qaytarma, marşrut ehtiyatı, auth/rollar, sürət limiti, saxta SOS ssenariləri, real kütləvi hadisədə heç kimin bloklanmaması, OpenAPI ilə real marşrut cədvəlinin uyğunluğu, dillərin eyni açar dəstinə malik olması.
 - **Yük testi** (`npm run load`, lokal, 50 paralel, SOS + təxliyyə sorğusu qarışığı): ~5 000+ sorğu/san., p95 ≈ 16 ms.
 - Dispetçer paneli real Chrome-da (başsız rejim) ssenarilərlə yoxlanılıb. Mobil ana ekran render yoxlanılıb; geri sayım, "göndərildi" və təsdiq ekranlarının əl ilə klik testi aparılmayıb.
 - `Dockerfile` və `docker-compose.yml` hazırdır; image-in tərkibi və healthcheck əmri təmiz qovluqda əl ilə təkrarlanıb, lakin bu maşında Docker daemon işləmədiyi üçün **image real build edilməyib**.
@@ -137,7 +159,7 @@ Dizayn istiqaməti: DevLink-in təmiz dili (`#0071e3`, Plus Jakarta Sans/Inter, 
 | **Yeni rol: Prioritet SOS (hərəkət məhdudiyyətli)** | `priority.js` + `POST /api/profile`. Avtomatik Kritik Prioritet #1, əlçatan marşrut, əlçatan nəqliyyat (5.6). Ssenari: `priority_sos` |
 | Personal (dispetçer) rolu | `auth.js` → `ROLE_PERMISSIONS` + token (`observer` artıq nümunədir) |
 | UI-ın az/en dinamik dəyişməsi, yeni dil | `i18n-ext.js` → bir obyekt. Səhifə yenilənmədən dəyişir, test hər açarı yoxlayır |
-| Xarici API kəsintisi/yavaşlığı | Avtomatik ehtiyat marşrut, vətəndaşa bildirilir. Ssenari: `api_outage` |
+| Xarici API kəsintisi/yavaşlığı (HTTP 503 və ya >5 san.) | Dövrə kəsici + 3 pilləli ehtiyat (keş → statik matris → yerli qraf), "Oflayn / Ehtiyat marşrut rejimində işləyir" bildirişi, avtomatik bərpa (5.2.1). Ssenarilər: `api_outage`, `api_slow`, `api_recover` |
 | Yüksək yük | Sürət limitləri, fokuslu qiymətləndirmə, SSE birləşdirmə, flood zamanı təhlil throttle. Ssenari: `fake_flood`, `mass_event` |
 | Təhlükəsizlik tələbi | İmzalı sessiyalar, "Təhlükəsizlik rejimi" (`requireVerified`) iş vaxtı bir düymə ilə, rol/icazə |
 | Dispetçerdən kütləvi bildiriş / SMS ehtiyatı / qərar jurnalı | `broadcast.js`, `sms.js`, `audit.js` (5.8 – 5.10). Ssenarilər: `broadcast_demo`, `sms_sos` |
@@ -149,6 +171,7 @@ Dizayn istiqaməti: DevLink-in təmiz dili (`#0071e3`, Plus Jakarta Sans/Inter, 
 - Yol şəbəkəsi sintetikdir (real küçələr deyil), marşrut qraf düyünləri arasında düz seqmentlərdir. ETA piyada sürəti (80 m/dəq) və briqada üçün ~36 km/s ilə təxmin edilir.
 - Əlçatanlıq məlumatı (məntəqələrdə pandus/lift, yol seqmentlərində pilləsizlik) simulyasiyadır, real sidewalk məlumatı yoxdur. Əlçatan marşrutun ETA-sı piyada sürəti ilə təxmin edilir. Prioritet rol özü-bəyandır.
 - Cihaz kimliyi telefon/OTP ilə bağlı deyil. Saxtakar ayrı IP-lərdən çoxlu imzalı cihaz yaradıb gözləyərsə, müdafiəni keçə bilər. IP əsaslı təhlil CGNAT arxasında zəifdir (buna görə təqsirkar yalnız imzasız və ya yeni cihazlar sayılır).
+- Xarici xəritə API-si simulyasiyadır (real provayder yoxdur). Ehtiyat rejimdə ETA yerli sürət modeli ilə hesablanır (canlı tıxac yoxdur), buna görə "≈" ilə işarələnir. Oflayn rejimdə xəritə fonu (OpenStreetMap plitələri) yüklənmir, marşrut xətti və məntəqələr isə çəkilir.
 - Xəritə plitələri OpenStreetMap-dən yüklənir (internetsiz xəritə fonu boş görünür, marşrutlar və məntəqələr isə çəkilir). Leaflet lokaldır.
 - SMS gateway simulyasiyadır (real operator inteqrasiyası yoxdur). SMS-də yer (rayon və ya koordinat) verilməsə SOS yaradılmır, cavabla yer soruşulur. Kütləvi bildiriş "pull" modelidir: tətbiq açıq olmayanda push bildirişi göndərilmir (real yerləşdirmədə Web Push/FCM lazımdır).
 - Briqada seçimində məsafə düz xətlə (bazadan hadisə yerinə) hesablanır, yol şəbəkəsi və bağlı yollar nəzərə alınmır. Bir həyəcana bir briqada göndərilir (böyük hadisə üçün çoxlu briqada hələ yoxdur).

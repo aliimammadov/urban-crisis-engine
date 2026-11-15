@@ -214,7 +214,7 @@ test('accessible routing falls back safely when the external map API is down', a
   app.store.chaos.externalDown = true;
   const r = await app.evacuation.recommend({ ...NAS, accessible: true });
   const rec = r.points.find((p) => p.id === r.recommendedPointId);
-  assert.equal(rec.route.source, 'fallback');
+  assert.equal(rec.route.source, 'local', 'accessible mode skips the static matrix (it ignores step-free limits) and searches the local graph');
   assert.equal(rec.route.accessible, true);
 });
 

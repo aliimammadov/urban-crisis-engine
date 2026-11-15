@@ -1,4 +1,5 @@
 import { haversine, nearest } from './geo.js';
+import { CircuitBreaker, CircuitOpenError, ExternalApiError, RouteCache, withTimeout } from './resilience.js';
 
 // Deterministic stand-in for sidewalk data: ~14 % of segments have stairs / steep slope / no kerb ramp.
 function hashPct(s) {
@@ -18,6 +19,7 @@ export class RoadGraph {
     this.edges = new Map(); // id -> {id,a,b,length,closed,congestion}
     this.adj = new Map([...this.nodes.keys()].map((id) => [id, []]));
     this.#build(k);
+    this.buildMatrix();
   }
 
   #addEdge(a, b) {
@@ -55,6 +57,44 @@ export class RoadGraph {
         .slice(0, k)
         .forEach(({ b }) => this.#addEdge(a, b));
     }
+  }
+
+  /**
+   * Static backup data: all-pairs shortest paths over the road network with every road OPEN
+   * (Floyd-Warshall, computed once at start-up). It answers route questions with no external call and no search;
+   * callers must still check the result against CURRENT closures (see RoutingService).
+   */
+  buildMatrix() {
+    const ids = [...this.nodes.keys()];
+    const n = ids.length;
+    const idx = new Map(ids.map((id, i) => [id, i]));
+    const dist = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => (i === j ? 0 : Infinity)));
+    const next = Array.from({ length: n }, () => Array(n).fill(-1));
+    for (const e of this.edges.values()) {
+      const a = idx.get(e.a); const b = idx.get(e.b);
+      dist[a][b] = dist[b][a] = e.length; next[a][b] = b; next[b][a] = a;
+    }
+    for (let i = 0; i < n; i++) next[i][i] = i;
+    for (let k = 0; k < n; k++) for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+      if (dist[i][k] + dist[k][j] < dist[i][j]) { dist[i][j] = dist[i][k] + dist[k][j]; next[i][j] = next[i][k]; }
+    }
+    this.matrix = { ids, idx, dist, next };
+  }
+
+  matrixPath(fromId, toId) {
+    const m = this.matrix;
+    const a = m?.idx.get(fromId); const b = m?.idx.get(toId);
+    if (a == null || b == null || m.next[a][b] === -1) return null;
+    const nodeIds = [fromId];
+    const edgeIds = [];
+    let cur = a;
+    while (cur !== b) {
+      const nx = m.next[cur][b];
+      edgeIds.push([m.ids[cur], m.ids[nx]].sort().join('~'));
+      nodeIds.push(m.ids[nx]);
+      cur = nx;
+    }
+    return { nodeIds, edgeIds, length: m.dist[a][b] };
   }
 
   getEdge(id) {
@@ -136,48 +176,91 @@ export class RoadGraph {
 
 const WALK_M_PER_MIN = 80; // ~4.8 km/h
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-function withTimeout(promise, ms) {
-  let t;
-  const timeout = new Promise((_, rej) => { t = setTimeout(() => rej(new Error('ROUTING_TIMEOUT')), ms); });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(t));
-}
+const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); t.unref?.(); });
 
 /**
- * Routing facade with graceful degradation:
- *   1. "external" provider (simulated map/traffic API; honours live congestion, can be down/slow)
- *   2. local fallback (static graph, still honours road closures)
- *   3. straight-line estimate (last resort, flagged as such)
+ * Routing facade that survives the failure of the external map/routing API (HTTP 503, network error, or no answer
+ * within the deadline). Order of preference for every request:
+ *   external  live API (traffic-aware), guarded by a circuit breaker and a hard deadline
+ *   cache     the last successful route between the same two network nodes (only if every segment is still usable)
+ *   matrix    static all-pairs matrix computed from the local road network (only if every segment is still usable)
+ *   local     live search on the local road graph with the CURRENT closures / step-free limits
+ * Only when no tier finds a way is the point reported as unreachable. route() never throws.
  */
 export class RoutingService {
-  constructor(graph, chaosState, { timeoutMs = 700 } = {}) {
+  constructor(graph, chaosState, { timeoutMs = 1500, now = () => Date.now(), breaker, cache } = {}) {
     this.graph = graph;
-    this.chaos = chaosState; // live reference: {externalDown, externalLatencyMs}
+    this.chaos = chaosState; // live reference: {mode, externalDown, externalLatencyMs}
     this.timeoutMs = timeoutMs;
+    this.now = now;
+    this.breaker = breaker ?? new CircuitBreaker({ now });
+    this.cache = cache ?? new RouteCache({ now });
+    this.resetStats();
   }
 
+  resetStats() {
+    this.stats = { bySource: { external: 0, cache: 0, matrix: 0, local: 0, error: 0, blocked: 0 }, internalErrors: 0, lastFallbackAt: null, lastSource: null };
+  }
+
+  reset() { this.breaker.reset(); this.cache.clear(); this.resetStats(); }
+
+  /** Simulated external provider. Honours the chaos switches (503 / network error / slow answer). */
   async #external(fromId, toId, opts) {
-    if (this.chaos.externalDown) throw new Error('EXTERNAL_DOWN');
-    if (this.chaos.externalLatencyMs > 0) await sleep(this.chaos.externalLatencyMs);
+    const c = this.chaos;
+    const mode = c.mode ?? (c.externalDown ? 'http503' : 'ok');
+    if (c.externalDown || mode === 'http503') throw new ExternalApiError('http', 503, 'Service Unavailable');
+    if (mode === 'error') throw new ExternalApiError('network', 0, 'ECONNRESET');
+    const latency = c.externalLatencyMs > 0 ? c.externalLatencyMs : mode === 'slow' ? 6000 : 0;
+    if (latency > 0) await sleep(latency);
     return this.graph.shortestPath(fromId, toId, { useTraffic: true, ...opts });
   }
 
-  /** @returns {Promise<{source:string, blocked:boolean, geometry:Array, distanceM:number, etaMin:number}>} */
+  /** A remembered / precomputed path is only usable if every segment is open now (and step-free when required). */
+  #usable(path, accessible) {
+    return path.edgeIds.every((id) => { const e = this.graph.getEdge(id); return e && !e.closed && (!accessible || e.stepFree); });
+  }
+
+  /** @returns {Promise<{source:string, blocked:boolean, geometry:Array, distanceM:number, etaMin:number, degraded:boolean}>} */
   async route(origin, target, { accessible = false } = {}) {
+    try {
+      const r = await this.#route(origin, target, accessible);
+      this.stats.bySource[r.blocked ? 'blocked' : r.source] += 1;
+      this.stats.lastSource = r.source;
+      if (r.source !== 'external') this.stats.lastFallbackAt = this.now();
+      return r;
+    } catch (err) {
+      // defence in depth: a bug in a fallback tier must not take a citizen request down
+      this.stats.internalErrors += 1; this.stats.bySource.error += 1; this.stats.lastSource = 'error';
+      console.error('[routing] unexpected failure, reporting the point as unreachable:', err?.message ?? err);
+      return { source: 'error', blocked: true, degraded: true, geometry: [], distanceM: Infinity, etaMin: Infinity };
+    }
+  }
+
+  async #route(origin, target, accessible) {
     const start = this.graph.nearestNode(origin);
     const end = this.graph.nodes.get(target.id) ?? this.graph.nearestNode(target);
-    let path;
+    const key = `${start.id}|${end.id}|${accessible ? 1 : 0}`;
+    let path = null;
     let source = 'external';
+    let ageMs = null;
+    let reason = null;
     try {
-      path = await withTimeout(this.#external(start.id, end.id, { accessible }), this.timeoutMs);
-    } catch {
-      source = 'fallback';
-      path = this.graph.shortestPath(start.id, end.id, { useTraffic: false, accessible });
+      path = await this.breaker.call(() => withTimeout(this.#external(start.id, end.id, { accessible }), this.timeoutMs));
+      if (path) this.cache.set(key, { ...path }); // remember the last good route
+    } catch (err) {
+      reason = err instanceof CircuitOpenError ? 'circuit_open' : err?.kind ?? 'error';
+      // each tier is guarded on its own: a bug in one must fall through to the next, never to the user
+      const guarded = (fn) => { try { return fn(); } catch (e) { this.stats.internalErrors += 1; console.error('[routing] fallback tier failed:', e?.message ?? e); return null; } };
+      const hit = guarded(() => this.cache.get(key));
+      if (hit && guarded(() => this.#usable(hit.value, accessible))) { path = hit.value; source = 'cache'; ageMs = hit.ageMs; }
+      if (!path && !accessible) {
+        const m = guarded(() => this.graph.matrixPath(start.id, end.id));
+        if (m && guarded(() => this.#usable(m, false))) { path = m; source = 'matrix'; }
+      }
+      if (!path) { path = this.graph.shortestPath(start.id, end.id, { useTraffic: false, accessible }); source = 'local'; }
     }
-    if (!path) {
-      return { source, blocked: true, geometry: [], distanceM: Infinity, etaMin: Infinity };
-    }
+    const degraded = source !== 'external';
+    if (!path) return { source, blocked: true, degraded, reason, geometry: [], distanceM: Infinity, etaMin: Infinity };
     const geometry = [
       { lat: origin.lat, lng: origin.lng },
       ...path.nodeIds.map((id) => ({ lat: this.graph.nodes.get(id).lat, lng: this.graph.nodes.get(id).lng })),
@@ -186,6 +269,40 @@ export class RoutingService {
     const distanceM = Math.round(
       haversine(origin, this.graph.nodes.get(start.id)) + path.length + haversine(this.graph.nodes.get(end.id), target),
     );
-    return { source, blocked: false, accessible, geometry, distanceM, etaMin: Math.max(1, Math.round(distanceM / WALK_M_PER_MIN)), edgeIds: path.edgeIds };
+    return {
+      source, degraded, reason, ageSec: ageMs == null ? null : Math.round(ageMs / 1000), blocked: false, accessible,
+      geometry, distanceM, etaMin: Math.max(1, Math.round(distanceM / WALK_M_PER_MIN)), edgeIds: path.edgeIds,
+    };
+  }
+
+  /** What the citizen app needs to know about the routes of one response. */
+  summarize(routes) {
+    const sources = [...new Set(routes.map((r) => r.source))];
+    const br = this.breaker.status();
+    const degraded = routes.some((r) => r.degraded) || br.state !== 'closed';
+    const cacheAges = routes.filter((r) => r.source === 'cache').map((r) => r.ageSec ?? 0);
+    return {
+      mode: degraded ? 'offline-fallback' : 'online',
+      degraded,
+      sources,
+      breaker: br.state,
+      retryInMs: br.retryInMs,
+      reason: degraded ? br.lastError?.kind ?? null : null,
+      cacheAgeSec: cacheAges.length ? Math.max(...cacheAges) : null,
+    };
+  }
+
+  /** Dependency health for /api/health and the dispatcher. */
+  status() {
+    const br = this.breaker.status();
+    return {
+      // the mode follows the circuit: the moment a trial call succeeds the service is online again
+      mode: br.state !== 'closed' ? 'offline-fallback' : 'online',
+      breaker: br,
+      cacheSize: this.cache.size,
+      served: { ...this.stats.bySource },
+      internalErrors: this.stats.internalErrors,
+      timeoutMs: this.timeoutMs,
+    };
   }
 }

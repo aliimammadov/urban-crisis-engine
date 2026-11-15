@@ -8,7 +8,7 @@ const T = {
 export const SELF_ROUTES = ['GET /api/openapi.json', 'GET /api/docs'];
 
 export const ENDPOINTS = [
-  { method: 'GET', path: '/api/health', tag: T.system, auth: 'public', summary: 'Sağlamlıq yoxlaması', response: '{ ok, time }' },
+  { method: 'GET', path: '/api/health', tag: T.system, auth: 'public', summary: 'Sağlamlıq yoxlaması + asılılıqların vəziyyəti: xarici xəritə/marşrut API-sinin dövrə kəsicisi (closed / open / half_open), xətanın növü, keş ölçüsü, mənbələr üzrə xidmət sayı. mode = online | offline-fallback', response: '{ ok, time, mode, dependencies: { routing: { mode, breaker: { state, retryInMs, lastError }, cacheSize, served } } }' },
   { method: 'GET', path: '/api/config', tag: T.system, auth: 'public', summary: 'SOS növləri, dillər, qayda həddləri', response: '{ sosTypes, languages, rules }' },
   { method: 'GET', path: '/api/i18n/:lang', tag: T.system, auth: 'public', summary: 'Tərcümə lüğəti (az, en, ru)', response: '{ lang, messages }' },
   { method: 'GET', path: '/api/districts', tag: T.citizen, auth: 'public', summary: 'Rayonlar siyahısı', response: '[ { id, name, lat, lng } ]' },
@@ -18,7 +18,7 @@ export const ENDPOINTS = [
     method: 'GET', path: '/api/evacuation', tag: T.citizen, auth: 'public',
     summary: 'Ən yaxın təhlükəsiz məntəqələr + tövsiyə olunan təxliyyə marşrutu. Məntəqə ≥90% dolu, yol bağlı və ya dolma sürəti səbəbindən çatanda dolacaqsa alternativ təklif olunur.',
     query: { lat: 'number', lng: 'number', district: 'string (lat/lng əvəzinə)', accessible: '1 = yalnız əlçatan (panduslu/maneəsiz) məntəqə və marşrut. Prioritet rollu imzalı cihaz üçün avtomatik' },
-    response: '{ origin, recommendedPointId, rerouted:{reasons[]}, noSafePoint, accessible, noAccessibleRoute, needsTransport, points[ {status, projectedPct, fillingFast, accessible, access[], route:{geometry, distanceM, etaMin, source}} ] }',
+    response: '{ origin, recommendedPointId, rerouted:{reasons[]}, noSafePoint, routing:{ mode: online | offline-fallback, degraded, sources: [external | cache | matrix | local], reason, cacheAgeSec }, accessible, noAccessibleRoute, needsTransport, points[ {status, projectedPct, fillingFast, accessible, access[], route:{geometry, distanceM, etaMin, source}} ] }',
   },
   { method: 'POST', path: '/api/session', tag: T.citizen, auth: 'public', summary: 'İmzalı cihaz kimliyi alır (IP üzrə sürət limiti var)', body: { deviceId: 'string (ixtiyari, əvvəlki kimliyi saxlamaq üçün)' }, response: '{ deviceId, token }' },
   {
@@ -54,7 +54,7 @@ export const ENDPOINTS = [
   { method: 'POST', path: '/api/brigades/:id/status', tag: T.dispatcher, auth: 'brigade:write', summary: 'Briqada statusu', body: { status: 'available | dispatched | on_scene | offline' }, response: 'briqada' },
 
   { method: 'POST', path: '/api/sim/occupancy', tag: T.admin, auth: '*', summary: 'Məntəqənin doluluğunu təyin edir', body: { pointId: 'string', occupied: 'number' }, response: 'məntəqə' },
-  { method: 'POST', path: '/api/sim/chaos', tag: T.admin, auth: '*', summary: 'Xarici API kəsintisi / gecikməsi', body: { externalDown: 'boolean', externalLatencyMs: 'number' }, response: 'chaos' },
+  { method: 'POST', path: '/api/sim/chaos', tag: T.admin, auth: '*', summary: 'Xarici xəritə API-sinin nasazlığını simulyasiya edir: mode = ok | http503 | slow (cavab 5 san.-dən gec) | error (şəbəkə xətası). ok seçiləndə dövrə kəsici dərhal sınaq sorğusu göndərir. Köhnə externalDown / externalLatencyMs də işləyir', body: { mode: 'ok | http503 | slow | error', externalDown: 'boolean (köhnə)', externalLatencyMs: 'number (köhnə)' }, response: 'chaos' },
   { method: 'POST', path: '/api/sim/rules', tag: T.admin, auth: '*', summary: 'Qayda həddlərini işləyərkən dəyişir (yoxlanılır). "Təhlükəsizlik rejimi": requireVerified', body: { minDistinctReporters: 'number', overcrowdPct: 'number', requireVerified: 'boolean', '…': 'bax /api/config' }, response: 'rules' },
   { method: 'GET', path: '/api/sim/scenarios', tag: T.admin, auth: '*', summary: 'Demo ssenari adları', response: '[ name ]' },
   { method: 'POST', path: '/api/sim/sms', tag: T.admin, auth: '*', summary: 'SMS simulyatoru: gateway açarı olmadan eyni emal xəttini işlədir', body: { from: 'string', text: 'string' }, response: '{ intent, reply }' },

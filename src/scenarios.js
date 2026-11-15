@@ -2,7 +2,7 @@
 // (addSos -> abuse guard -> crisis rules), nothing is faked at the dashboard level.
 import { AppError } from './errors.js';
 
-export const SCENARIO_NAMES = ['priority_sos', 'sms_sos', 'broadcast_demo', 'cluster', 'fake_flood', 'mass_event', 'filling', 'overcrowd', 'api_outage', 'road_block', 'reset'];
+export const SCENARIO_NAMES = ['priority_sos', 'sms_sos', 'broadcast_demo', 'api_slow', 'api_recover', 'cluster', 'fake_flood', 'mass_event', 'filling', 'overcrowd', 'api_outage', 'road_block', 'reset'];
 
 // tiny deterministic PRNG so a scenario looks the same every run
 function rng(seed) {
@@ -13,7 +13,7 @@ const jitter = (r, m) => (r() - 0.5) * 2 * m; // metres -> degrees below (approx
 const DEG = 1 / 111_000;
 const TYPES = ['FIRE', 'COLLAPSE', 'FLOOD', 'MEDICAL'];
 
-export function runScenario(name, { store, graph, resetAll, sms, broadcasts }) {
+export function runScenario(name, { store, graph, resetAll, sms, broadcasts, breaker }) {
   if (!SCENARIO_NAMES.includes(name)) throw new AppError(404, 'SCENARIO_NOT_FOUND');
   const r = rng(Date.now() & 0xffff);
   const now = store.now();
@@ -81,10 +81,15 @@ export function runScenario(name, { store, graph, resetAll, sms, broadcasts }) {
       store.setOccupancy(p.id, Math.round(p.capacity * 0.96));
       return { name, pointId: p.id };
     }
-    case 'api_outage':
-      store.chaos.externalDown = true;
-      store.chaos.externalLatencyMs = 0;
-      store.emit('change', 'chaos');
+    case 'api_outage': // HTTP 503
+      store.setChaos({ mode: 'http503' });
+      return { name };
+    case 'api_slow': // answers only after 6 s: beyond the deadline
+      store.setChaos({ mode: 'slow' });
+      return { name };
+    case 'api_recover':
+      store.setChaos({ mode: 'ok' });
+      breaker?.allowProbeNow();
       return { name };
     case 'road_block': {
       const edges = graph.adj.get('nasimi') ?? [];

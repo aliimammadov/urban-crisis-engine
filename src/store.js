@@ -30,13 +30,34 @@ export class Store extends EventEmitter {
     this.alerts = [];
     // mutate in place: RoutingService holds a live reference to this object
     this.chaos ??= {};
-    Object.assign(this.chaos, { externalDown: false, externalLatencyMs: 0 });
+    Object.assign(this.chaos, { mode: 'ok', externalDown: false, externalLatencyMs: 0 });
     this.seq = 0;
     this.occSamples = new Map(); // pointId -> [{t, occ}] for inflow-rate forecasts
     for (const p of this.points.values()) this.recordOccupancy(p.id);
     this.quarantineVersion = 0; // bumped by AbuseGuard whenever a SOS is (un)quarantined
     this.guard?.reset?.();
     this.emit('change', 'reset');
+  }
+
+  /**
+   * Fault injection for the external map API.
+   *   mode: 'ok' | 'http503' (service unavailable) | 'slow' (answers after 6 s = past the deadline) | 'error' (network failure)
+   * The legacy flags externalDown / externalLatencyMs still work and map onto a mode.
+   */
+  setChaos({ mode, externalDown, externalLatencyMs } = {}) {
+    const c = this.chaos;
+    if (mode != null) {
+      if (!['ok', 'http503', 'slow', 'error'].includes(mode)) throw new AppError(400, 'INVALID_CHAOS');
+      c.mode = mode;
+      c.externalDown = mode === 'http503';
+      c.externalLatencyMs = mode === 'slow' ? 6000 : 0;
+    } else {
+      if (typeof externalDown === 'boolean') c.externalDown = externalDown;
+      if (Number.isFinite(externalLatencyMs)) c.externalLatencyMs = Math.max(0, externalLatencyMs);
+      c.mode = c.externalDown ? 'http503' : c.externalLatencyMs > 0 ? 'slow' : 'ok';
+    }
+    this.emit('change', 'chaos');
+    return { ...c };
   }
 
   nextId(prefix) {
