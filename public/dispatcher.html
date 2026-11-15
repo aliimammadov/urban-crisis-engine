@@ -57,6 +57,8 @@
   .pill.warn { background:#fff4de; color:#8a5a00; font-weight:600; } .pill .dotw { width:8px; height:8px; border-radius:50%; background:#e8a100; }
   .rt { font-size:13px; } .rt .row { display:flex; justify-content:space-between; gap:10px; padding:5px 0; border-top:1px solid #f0f1f4; } .rt .row:first-child { border-top:0; } .rt .row span:first-child { color:var(--muted); }
   .rt .srcs { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; } .rt .srcs span { background:var(--soft); border-radius:999px; padding:2px 10px; font-size:12px; font-weight:600; }
+  .pend { border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-bottom:8px; display:flex; flex-direction:column; gap:8px; cursor:pointer; } .pend .top { display:flex; justify-content:space-between; gap:8px; font-size:13.5px; align-items:center; } .pend .top small { color:var(--muted); }
+  .pend button.go { height:40px; border:0; border-radius:10px; background:var(--blue); color:#fff; font:700 14px var(--head); }
   .rel { border:1px solid var(--line); background:#fff; border-radius:8px; padding:3px 10px; font-size:12.5px; font-weight:600; }
   .kpis { display:flex; gap:12px; flex-wrap:wrap; } .kpi { flex:1 1 130px; background:#fff; border:1px solid var(--line); border-radius:16px; padding:12px 16px; } .kpi small { color:var(--muted); font-size:12px; } .kpi div { display:flex; align-items:baseline; gap:8px; } .kpi b { font:800 28px var(--head); letter-spacing:-0.04em; }
   #mapbox { position:relative; flex-grow:1; min-height:440px; border-radius:18px; overflow:hidden; border:1px solid var(--line); }
@@ -120,6 +122,7 @@
     <div class="h"><span><span id="tAlerts"></span><span class="count" id="alertCount">0</span></span><span class="small" id="tCritical"></span></div>
     <div id="abuse"></div>
     <div id="alerts" style="display:flex;flex-direction:column;gap:12px"></div>
+    <div class="card" id="pendCard" hidden><div class="lbl" id="tPend"></div><div class="small" id="pendHint" style="text-align:left;margin-bottom:8px"></div><div id="pending"></div></div>
     <div class="card" id="quarCard" hidden><div class="lbl" id="tSusp"></div><div class="small" id="suspNote" style="text-align:left;margin-bottom:8px"></div><div class="feed" id="quar"></div></div>
     <details class="card" id="bcCard"><summary class="lbl" id="bcSummary" style="cursor:pointer;margin:0"></summary>
       <div class="bcform">
@@ -207,6 +210,7 @@ const act = async (fn) => { try { await fn(); } catch (e) { toast(e.message, tru
 function statics() {
   $('tAlerts').textContent = tr('d.alerts'); $('tCritical').textContent = tr('d.criticalFirst'); $('tFeed').textContent = tr('d.lastSignals');
   $('tPoints').textContent = tr('d.pointsTitle'); $('tBrigades').textContent = tr('d.brigadesTitle');
+  $('tPend').textContent = tr('d.pending.title'); $('pendHint').textContent = tr('d.pending.hint');
   $('tSusp').textContent = tr('d.suspicious'); $('suspNote').textContent = tr('d.suspiciousNote');
   $('scSummary').textContent = tr('d.scenarios'); $('tManual').textContent = tr('d.manual');
   $('loginTitle').textContent = tr('d.login.title'); $('loginSubmit').textContent = tr('d.login.submit'); $('token').placeholder = tr('d.login.token');
@@ -252,7 +256,7 @@ function render() {
   const apiDown = snap.chaos.externalDown;
   renderRouting(apiDown);
   if (snap.chaos?.mode && document.activeElement !== $('simApi')) $('simApi').value = snap.chaos.mode;
-  renderAbuse(); renderAlerts(); renderFeed(); renderQuarantine(); renderKpis(); renderSide(); renderBcHistory(); renderJournal(); drawMap();
+  renderAbuse(); renderAlerts(); renderPending(); renderFeed(); renderQuarantine(); renderKpis(); renderSide(); renderBcHistory(); renderJournal(); drawMap();
   if (bcBuiltFor !== state.lang + snap.points.length + snap.zones.length) buildBcForm();
   if (replay) showFrame(replay.i);
 }
@@ -264,6 +268,29 @@ function renderAbuse() {
   const sigs = a.signals.map((s) => fmt('d.sig.' + s.code, s)).join(' · ');
   $('abuse').innerHTML = `<div class="abuse ${a.attack ? 'attack' : 'surge'}"><b>${esc(a.attack ? tr('d.attack') : tr('d.surge'))}</b><br>${esc(sigs)}</div>`;
 }
+
+function renderPending(force = false) {
+  if (!force && document.activeElement?.matches?.('#pending select')) return; // do not rebuild a dropdown in use
+  const list = snap.pending ?? [];
+  $('pendCard').hidden = !list.length;
+  $('pending').innerHTML = list.map((p) => {
+    const key = 'sos:' + p.id;
+    const sel = picks[key] && p.candidates.some((c) => c.id === picks[key]) ? picks[key] : p.autoId ?? p.candidates[0]?.id;
+    return `<div class="pend" data-focus="${p.lat},${p.lng}">
+      <div class="top"><span><b>${esc(tr('sos.' + p.type))}</b> · ${esc(zoneName(p.districtId))}${p.note ? ' · ' + esc(p.note) : ''}${p.source === 'sms' ? ` <span class="need">${esc(tr('d.flag.sms'))}</span>` : ''}${p.verified ? '' : ` <span class="flagtag">${esc(tr('d.flag.unverified'))}</span>`}</span><small>${esc(ago(p.createdAt))}</small></div>
+      ${p.candidates.length ? `<label class="pick"><span>${esc(tr('d.pickBrigade'))}</span><select data-ppick="${p.id}" aria-label="${esc(tr('d.pickBrigade'))}">${p.candidates.map((c) => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${esc(c.name)} · ${esc(tr('brigade.kind.' + c.kind))} · ~${c.etaMin} ${esc(tr('d.min'))} · ${c.match === 'exact' ? '✓' : '⚠'} ${esc(tr('d.match.' + c.match))}</option>`).join('')}</select></label>
+      <button class="go" data-dispatch="${p.id}">${esc(tr('d.dispatch'))}</button>` : `<div class="warnrow">${esc(tr('d.pending.noBrigade'))}</div>`}</div>`;
+  }).join('');
+  $('pending').querySelectorAll('[data-ppick]').forEach((s) => { s.addEventListener('click', (e) => e.stopPropagation()); s.addEventListener('change', () => { picks['sos:' + s.dataset.ppick] = s.value; }); });
+  $('pending').querySelectorAll('[data-dispatch]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); act(async () => {
+    b.disabled = true;
+    const s = $('pending').querySelector(`[data-ppick="${b.dataset.dispatch}"]`);
+    try { const r = await api('POST', `/api/sos/${b.dataset.dispatch}/dispatch`, { token, body: s ? { brigadeId: s.value } : undefined }); toast(fmt('d.dispatched', { name: snap.brigades.find((x) => x.id === r.result.brigadeId)?.name ?? r.result.brigadeId })); }
+    finally { b.disabled = false; }
+  }); }));
+  $('pending').querySelectorAll('[data-focus]').forEach((c) => c.addEventListener('click', () => { const [la, ln] = c.dataset.focus.split(',').map(Number); map?.flyTo([la, ln], 15); }));
+}
+$('pending').addEventListener('focusout', () => setTimeout(() => snap && renderPending(), 0));
 
 function renderQuarantine() {
   const q = snap.quarantined ?? [];
@@ -394,7 +421,10 @@ function alertCard(a) {
   const where = zoneName(a.districtId);
   const amber = a.level === 'amber';
   const prio = a.type === 'PRIORITY_SOS';
-  const title = prio
+  const single = a.type === 'SOS_SINGLE';
+  const title = single
+    ? `${tr('sos.' + a.sosType)}${a.sosState === 'resolved' ? ' · ' + tr('d.sosSafe') : a.sosState === 'cancelled' ? ' · ' + tr('d.sosCancelled') : ''}`
+    : prio
     ? `${tr('d.needs')}: ${(a.needs ?? []).map((n) => tr('m.need.' + n)).join(', ')} · ${tr('d.selfDeclared')}`
     : a.type === 'SOS_CLUSTER'
     ? `${a.reporters} ${tr('d.reporters')} · ${tr('d.radius')}`
@@ -416,7 +446,7 @@ function alertCard(a) {
         <div>${brig ? `<span style="color:#6d3fd8">▸</span><span><b>${esc(brig.name)}</b> ${esc(brig.kind !== 'accessible_transport' ? tr('d.accVehicleFallback') : tr('d.accVehicle'))} ~${brig.etaMin} ${esc(tr('d.min'))}${matchTag}</span>` : `<span>⚠</span><span>${esc(tr('d.noAccVehicle'))}</span>`}</div>
         <div>${apt ? `<span style="color:#1a9e55">▸</span><span>${esc(tr('d.accPoint'))}: <b>${esc(name(apt.name))}</b> · ${apt.distanceM} ${esc(tr('ui.meters'))} ${(apt.access ?? []).map((x) => `<span class="accfeat">${esc(tr('acc.' + x))}</span>`).join('')}</span>` : `<span>⚠</span><span>${esc(tr('d.noAccPoint'))}</span>`}</div></div>`;
   const planHtml = prio && !done ? prioPlan : done
-    ? `<div class="plan"><div>✓ <span><b>${esc(snap.brigades.find((x) => x.id === a.result.brigadeId)?.name ?? a.result.brigadeId ?? '-')}</b>${a.result.etaMin ? ` · ~${a.result.etaMin} ${esc(tr('d.min'))}` : ''}${a.result.manual ? `<span class="mtag">${esc(tr('d.manualPick'))}</span>` : ''}</span></div>${prio ? '' : `<div>✓ <span><b>${esc(name(snap.points.find((p) => p.id === a.result.openedPointId)?.name) ?? '-')}</b></span></div>`}</div>`
+    ? `<div class="plan"><div>✓ <span><b>${esc(snap.brigades.find((x) => x.id === a.result.brigadeId)?.name ?? a.result.brigadeId ?? '-')}</b>${a.result.etaMin ? ` · ~${a.result.etaMin} ${esc(tr('d.min'))}` : ''}${a.result.manual ? `<span class="mtag">${esc(tr('d.manualPick'))}</span>` : ''}</span></div>${prio || single ? '' : `<div>✓ <span><b>${esc(name(snap.points.find((p) => p.id === a.result.openedPointId)?.name) ?? '-')}</b></span></div>`}</div>`
     : `<div class="plan"><div class="lbl" style="margin:0">${esc(tr('d.after'))}</div>
         ${amber ? '' : `<div>${brig ? `<span style="color:#0071e3">▸</span><span><b>${esc(brig.name)}</b> <small>${esc(tr('brigade.kind.' + brig.kind))}</small> ${esc(tr('d.sendsBrigade'))} ~${brig.etaMin} ${esc(tr('d.min'))}${matchTag}</span>` : `<span>⚠</span><span>${esc(tr('d.noBrigade'))}</span>`}</div>`}
         <div>${pt ? `<span style="color:#1a9e55">▸</span><span><b>${esc(name(pt.name))}</b> ${esc(tr('d.opensPoint'))} ${pt.capacity}</span>` : `<span>⚠</span><span>${esc(tr('d.noReserve'))}</span>`}</div></div>`;
@@ -425,8 +455,8 @@ function alertCard(a) {
     ? (left > 0 ? `<button class="undo" data-undo="${a.id}">${esc(tr('d.undo'))} (${Math.ceil(left / 1000)} s)</button>` : `<div class="small">${esc(tr('d.approvedAs'))}</div>`)
     : `<button class="approve" data-approve="${a.id}">${esc(tr('d.approve'))}</button><div class="small">${esc(tr('d.undoHint'))}</div>`;
   return `<article class="alert ${done ? 'done' : prio ? 'priority' : amber ? 'amber' : ''}" data-focus="${a.center.lat},${a.center.lng}">
-    <div class="eyebrow"><span class="d"></span>${esc(prio ? '♿ ' + tr('d.priority') : amber ? tr('d.warning') : tr('d.redAlerts'))} · ${esc(where)}<time>${esc(ago(a.createdAt))}</time></div>
-    <div class="atitle">${esc(prio ? tr('alert.PRIORITY_SOS_TITLE') : amber ? tr('alert.POINT_FILLING_TITLE') : tr('alert.RED_DISPATCH_AND_OPEN_POINT'))}</div>
+    <div class="eyebrow"><span class="d"></span>${esc(single ? tr('d.single') : prio ? '♿ ' + tr('d.priority') : amber ? tr('d.warning') : tr('d.redAlerts'))} · ${esc(where)}<time>${esc(ago(a.createdAt))}</time></div>
+    <div class="atitle">${esc(single ? fmt('d.dispatched', { name: snap.brigades.find((x) => x.id === a.result?.brigadeId)?.name ?? '-' }) : prio ? tr('alert.PRIORITY_SOS_TITLE') : amber ? tr('alert.POINT_FILLING_TITLE') : tr('alert.RED_DISPATCH_AND_OPEN_POINT'))}</div>
     <div style="font-size:13.5px;color:var(--muted)">${esc(title)}</div>
     ${prio ? `<div class="chips">${(a.needs ?? []).map((n) => `<span class="need">${esc(tr('m.need.' + n))}</span>`).join('')}</div>` : ''}${chips ? `<div class="chips">${chips}</div>` : ''}${planHtml}${picker}${actions}</article>`;
 }

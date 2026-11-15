@@ -233,7 +233,7 @@ export class CrisisEngine {
     const cands = this.candidates(alert);
     const auto = cands.find((c) => c.match !== 'special'); // reserved vehicles (accessible transport) are never auto-picked here
     const reserves = [...this.store.points.values()].filter((p) => !p.active);
-    const np = nearest(alert.center, reserves);
+    const np = alert.type === 'SOS_SINGLE' ? null : nearest(alert.center, reserves); // one person: no new assembly point
     return {
       brigade: auto ? { id: auto.id, name: auto.name, kind: auto.kind, etaMin: auto.etaMin, match: auto.match } : null,
       wantedKind: alert.level === 'amber' ? null : (KIND_PREF[this.#wantedType(alert)] ?? ['rescue'])[0],
@@ -244,6 +244,7 @@ export class CrisisEngine {
 
   /** The emergency type that decides which kind of brigade is wanted (null = crowd control -> rescue). */
   #wantedType(alert) {
+    if (alert.type === 'SOS_SINGLE') return alert.sosType ?? this.store.sos.findLast((s) => s.id === alert.sosId)?.type ?? null;
     if (alert.type !== 'SOS_CLUSTER') return null;
     const ids = new Set(alert.sosIds ?? []);
     const counts = {};
@@ -395,10 +396,63 @@ export class CrisisEngine {
     const np = this.store.points.get(alert.result.openedPointId);
     if (np && np.occupied === 0) np.active = false;
 
+    if (alert.type === 'SOS_SINGLE') { // nothing to re-open: the SOS goes back to the pending list
+      const i = this.store.alerts.indexOf(alert);
+      if (i >= 0) this.store.alerts.splice(i, 1);
+      this.store.emit('change', 'alert');
+      return { ...alert, status: 'cancelled' };
+    }
     alert.status = 'open';
     delete alert.approvedAt; delete alert.approvedBy; delete alert.result;
     this.store.emit('change', 'alert');
     return alert;
+  }
+
+  /**
+   * SOS that no alert covers yet (typically ONE person: the 4-reporter rule has not fired), newest first,
+   * each with the ranked free brigades, so a dispatcher can send help to any individual signal.
+   */
+  pendingSos(limit = 12) {
+    const covered = new Set();
+    for (const a of this.store.alerts) if (a.status === 'open' || a.status === 'approved') for (const id of a.sosIds ?? []) covered.add(id);
+    const out = [];
+    const all = this.store.sos;
+    for (let i = all.length - 1; i >= 0 && i >= all.length - 3000 && out.length < limit; i--) {
+      const s = all[i];
+      if (s.status !== 'open' || s.quarantined || covered.has(s.id)) continue;
+      const cands = this.candidates({ type: 'SOS_SINGLE', level: 'red', sosId: s.id, sosIds: [s.id], sosType: s.type, center: { lat: s.lat, lng: s.lng } });
+      out.push({
+        id: s.id, type: s.type, districtId: s.districtId, lat: s.lat, lng: s.lng, note: s.note, createdAt: s.createdAt,
+        verified: s.verified, source: s.source, priority: s.priority,
+        wantedKind: (KIND_PREF[s.type] ?? ['rescue'])[0],
+        autoId: cands.find((c) => c.match !== 'special')?.id ?? null,
+        candidates: cands.slice(0, 8),
+      });
+    }
+    return out;
+  }
+
+  /**
+   * The dispatcher sends a brigade to ONE signal (no cluster needed). Creates an already-approved
+   * alert of type SOS_SINGLE so the whole lifecycle (movement, ETA, citizen progress, undo, journal) is shared.
+   */
+  dispatchSos(sosId, actor = 'dispatcher', { brigadeId } = {}) {
+    const s = this.store.findSos(sosId); // 404
+    if (s.status !== 'open') throw new AppError(409, 'SOS_NOT_OPEN');
+    const holder = this.store.alerts.find((a) => (a.status === 'open' || a.status === 'approved') && a.sosIds?.includes(sosId));
+    if (holder) throw new AppError(409, holder.status === 'approved' ? 'SOS_ALREADY_DISPATCHED' : 'SOS_IN_ALERT');
+    const probe = { type: 'SOS_SINGLE', level: 'red', sosId, sosIds: [sosId], sosType: s.type, center: { lat: s.lat, lng: s.lng } };
+    const cands = this.candidates(probe);
+    if (!cands.length || (!brigadeId && !cands.some((c) => c.match !== 'special'))) throw new AppError(409, 'NO_BRIGADE_AVAILABLE');
+    const alert = this.#newAlert({
+      type: 'SOS_SINGLE', action: 'DISPATCH_TO_SOS', center: probe.center, districtId: s.districtId,
+      sosId, sosIds: [sosId], sosType: s.type, reporters: 1, needs: [...(s.needs ?? [])], priority: s.priority,
+    });
+    try { return this.approve(alert.id, actor, { brigadeId }); } catch (e) {
+      const i = this.store.alerts.indexOf(alert);
+      if (i >= 0) this.store.alerts.splice(i, 1); // never leave a half-made alert behind
+      throw e;
+    }
   }
 
   /** Adds dispatcher-facing extras to a store snapshot: plan, SOS type counts, undo timer. */
@@ -413,8 +467,10 @@ export class CrisisEngine {
       }
       if (a.status === 'open') out.plan = this.plan(a);
       if (a.status === 'approved') out.undoMsLeft = Math.max(0, a.approvedAt + this.rules.undoWindowMs - this.store.now());
+      if (a.sosId) out.sosState = recent.findLast((s) => s.id === a.sosId)?.status ?? null; // open | resolved (safe) | cancelled
       return out;
     });
+    snap.pending = this.pendingSos(12);
     return snap;
   }
 }

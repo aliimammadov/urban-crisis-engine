@@ -192,6 +192,9 @@ export function createApp({
     return { frames, t0: frames[0]?.t ?? null, t1: frames.at(-1)?.t ?? null, everyMs: 5000 };
   });
   route('POST', '/api/alerts/:id/approve', { perm: 'alert:approve', audit: 'alert.approve', details: (o) => ({ type: o.type, brigadeId: o.result?.brigadeId ?? null, openedPointId: o.result?.openedPointId ?? null, etaMin: o.result?.etaMin ?? null, manual: !!o.result?.manual, match: o.result?.match ?? null }) }, (c) => crisis.approve(c.params.id, c.role, { brigadeId: c.body.brigadeId }));
+  // Send a brigade to ONE signal (no cluster alert needed). Optional brigadeId overrules the automatic, type-aware choice.
+  route('POST', '/api/sos/:id/dispatch', { perm: 'alert:approve', audit: 'sos.dispatch', details: (o) => ({ type: o.sosType, brigadeId: o.result?.brigadeId ?? null, etaMin: o.result?.etaMin ?? null, manual: !!o.result?.manual, match: o.result?.match ?? null }) },
+    (c) => crisis.dispatchSos(c.params.id, c.role, { brigadeId: c.body.brigadeId }));
   route('POST', '/api/sos/:id/release', { perm: 'alert:approve', audit: 'sos.release' }, (c) => {
     const s = guard.release(c.params.id);
     store.emit('change', 'sos', s); // re-run crisis rules: a released SOS may now complete a cluster

@@ -54,6 +54,11 @@ public/ (vanilla JS + Leaflet)  ──HTTP / SSE──▶  src/app.js (marşrutl
 
 **Dispetçer avtomatik seçimi üstələyə bilər.** Həyəcan kartında briqada siyahısı var: hər seçimin yanında növ, ETA və "uyğun növ / əvəzedici növ / növ uyğun deyil" işarəsi. Dispetçer istənilən **azad** briqadanı seçə bilər (qərar onundur) və təsdiq düyməsi məhz seçilmiş briqadanı göndərir (`POST /api/alerts/:id/approve` + `{ brigadeId }`). Server yoxlayır: briqada mövcud olmalı (404), azad olmalı (409), amber xəbərdarlıqda briqada seçilmir (400). Rədd edilən cəhd heç nəyi dəyişmir. Seçim "əl ilə" kimi işarələnir (`result.manual`, `result.match`), qərar jurnalında və təsdiqlənmiş kartda göstərilir. Canlı yeniləmələr (saniyədə bir) seçimi sıfırlamır və dispetçerin açıq saxladığı siyahı yenidən qurulmur.
 
+#### 5.1.2 Tək SOS-a briqada göndərmə (`crisis.js`: `pendingSos()`, `dispatchSos()`)
+"4 nəfər" qaydası yalnız **avtomatik** qırmızı həyəcan üçündür. Tək vətəndaşın SOS-u heç bir həyəcana düşmürsə, dispetçer panelində **"Gözləyən SOS-lar"** siyahısında görünür: növ, rayon, vaxt və SOS növünə görə sıralanmış azad briqadalar (5.1.1). Dispetçer "Briqada göndər" düyməsi ilə (`POST /api/sos/:id/dispatch`, ixtiyari `brigadeId`) həmin siqnala briqada göndərir. Bu, artıq təsdiqlənmiş `SOS_SINGLE` həyəcanı yaradır, ona görə hərəkət, ETA, 10 saniyəlik geri qaytarma və qərar jurnalı eyni mexanizmlə işləyir (ehtiyat məntəqə açılmır). Rədd edilən cəhd (briqada məşğuldur, SOS artıq göndərilib və s.) yarımçıq həyəcan saxlamır.
+
+**Vətəndaşın telefonu canlı yenilənir** (2 saniyəlik sorğu, digər ekranlarda da): "Briqada təyin olunur…" → "Yardım yoldadır · Fire-1 (Yanğınsöndürən) · 0:06" (geri sayım) → "Yardım yerindədir", hər keçiddə bildiriş və titrəmə. Real brauzerdə iki tabla ölçülüb: dispetçer düyməni basandan ~0,5 – 0,8 san. sonra telefonda addım dəyişir. Vətəndaş "Təhlükəsizəm" basarsa, dispetçerin kartında "Vətəndaş təhlükəsizdir" yazılır.
+
 ### 5.2 Marşrutlaşdırma və yenidən marşrut (`routing.js`, `evacuation.js`)
 Yol şəbəkəsi sintetikdir: rayon və məntəqə mərkəzlərindən minimal örtük ağacı (bağlılığı zəmanət verir) + hər nöqtə üçün ən yaxın 3 qonşu (ehtiyat yollar). Dijkstra bağlı yolları atlayır, canlı tıxac əmsalını çəkiyə vurur. Vətəndaşın ətrafındakı 5 məntəqə üçün marşrut hesablanır. "Dolu" (≥90%) və ya əlçatmaz olanlar tövsiyədən çıxarılır, yenidən marşrut səbəbi (`POINT_FULL`, `ROAD_BLOCKED`, `POINT_FILLING_FAST`) vətəndaşa göstərilir.
 
@@ -141,7 +146,7 @@ Dizayn istiqaməti: DevLink-in təmiz dili (`#0071e3`, Plus Jakarta Sans/Inter, 
 - Dispetçer: təsdiqdən əvvəl nəticə önbaxışı, 10 san. geri qaytarma, karantin siyahısı + "Burax", hücum/artım xəbərdarlığı, ssenari paneli, zaman maşını.
 
 ## 7. Keyfiyyət və test
-- **402 açar/dil, 183 avtomatik test** (`npm test`, ~0,5 san.): alqoritm sərhəd halları (dəqiq 95%, eyni şəxsin təkrar SOS-u, 5 dəqiqədən köhnə SOS), idempotentlik, geri qaytarma, marşrut ehtiyatı, auth/rollar, sürət limiti, saxta SOS ssenariləri, real kütləvi hadisədə heç kimin bloklanmaması, OpenAPI ilə real marşrut cədvəlinin uyğunluğu, dillərin eyni açar dəstinə malik olması.
+- **418 açar/dil, 195 avtomatik test** (`npm test`, ~0,5 san.): alqoritm sərhəd halları (dəqiq 95%, eyni şəxsin təkrar SOS-u, 5 dəqiqədən köhnə SOS), idempotentlik, geri qaytarma, marşrut ehtiyatı, auth/rollar, sürət limiti, saxta SOS ssenariləri, real kütləvi hadisədə heç kimin bloklanmaması, OpenAPI ilə real marşrut cədvəlinin uyğunluğu, dillərin eyni açar dəstinə malik olması.
 - **Yük testi** (`npm run load`, lokal, 50 paralel, SOS + təxliyyə sorğusu qarışığı): ~5 000+ sorğu/san., p95 ≈ 16 ms.
 - Dispetçer paneli real Chrome-da (başsız rejim) ssenarilərlə yoxlanılıb. Mobil ana ekran render yoxlanılıb; geri sayım, "göndərildi" və təsdiq ekranlarının əl ilə klik testi aparılmayıb.
 - `Dockerfile` və `docker-compose.yml` hazırdır; image-in tərkibi və healthcheck əmri təmiz qovluqda əl ilə təkrarlanıb, lakin bu maşında Docker daemon işləmədiyi üçün **image real build edilməyib**.

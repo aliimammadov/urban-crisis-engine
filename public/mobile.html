@@ -486,6 +486,7 @@ async function sendSos(type) {
   try {
     const r = await api('POST', '/api/sos', { body: { ...payload, accuracy: acc ?? undefined } });
     current = { id: r.id, type, createdAt: r.createdAt ?? Date.now(), priority: r.priority ?? (isPriority() ? 1 : 2) };
+    sosInfo = { stage: 2, etaSec: null, etaMin: null, brigade: null, priority: current.priority, cancelMsLeft: 60000, _at: Date.now() }; // baseline, so a very fast dispatch is still announced
     buzz([200, 80, 200]);
     if (!r.verified) ensureSession(true).catch(() => {}); // token missing/expired (e.g. server restarted): refresh for next time
   } catch (e) {
@@ -515,7 +516,14 @@ setInterval(flush, 15000); flush();
 let sentTimer = null; let sosInfo = null;
 async function pollSos() {
   if (!current?.id) return;
-  try { sosInfo = await api('GET', `/api/sos/${current.id}`); sosInfo._at = Date.now(); } catch (e) { if (e.status === 404) { current = null; lsSet('currentSos', null); go('home'); } }
+  const prevStage = sosInfo?.stage ?? null;
+  try {
+    sosInfo = await api('GET', `/api/sos/${current.id}`); sosInfo._at = Date.now();
+    if (prevStage != null && sosInfo.stage !== prevStage) {
+      if (sosInfo.stage === 3) { buzz([200, 80, 200]); toast(fmtT('m.toast.dispatched', { name: sosInfo.brigade?.name ?? '', min: sosInfo.etaMin ?? '?' }), false, 5000); }
+      else if (sosInfo.stage === 4) { buzz([300, 100, 300]); toast(tr('m.toast.arrived'), false, 5000); }
+    }
+  } catch (e) { if (e.status === 404) { current = null; lsSet('currentSos', null); go('home'); } }
   if (app.dataset.screen === 'sent') renderSent();
 }
 function renderSent() {
@@ -543,7 +551,7 @@ function renderSent() {
       <h2>${esc(queued ? tr('m.queuedTitle') : tr('m.sentTitle'))}</h2>${prio ? `<div class="prio">♿ ${esc(tr('m.priority'))}</div>` : ''}<p>${esc(queued ? tr('m.queuedBody') : tr('m.sentBody'))}${prio && !queued ? ' ' + esc(tr('m.priorityNote')) : ''}</p></div>
     ${queued ? smsCard(type) : ''}
     <div class="box"><div class="hd"><span style="display:flex;align-items:center;gap:10px">${svg(IC[type], TONE[type][1], 24)}${esc(tr('sos.' + type))}</span><small>${esc(time)}</small></div>
-      ${queued ? '' : `<div class="sep"></div>${step(0, tr('m.step1'), stage >= 1 ? time.slice(0, 5) : '')}${step(1, prio ? tr('m.transportAssign') : tr('m.step2'), stage === 2 ? tr('m.now') : '')}${step(2, (prio ? tr('m.transportOnWay') : tr('m.step3')) + (stage === 3 ? eta : ''), '')}${step(3, prio ? tr('m.transportArrived') : tr('m.step4'), '')}`}</div>
+      ${queued ? '' : `<div class="sep"></div>${step(0, tr('m.step1'), stage >= 1 ? time.slice(0, 5) : '')}${step(1, prio ? tr('m.transportAssign') : tr('m.step2'), stage === 2 ? tr('m.now') : '')}${step(2, (prio ? tr('m.transportOnWay') : tr('m.step3')) + (stage >= 3 && sosInfo?.brigade ? ` · ${sosInfo.brigade.name} (${tr('brigade.kind.' + sosInfo.brigade.kind)})` : '') + (stage === 3 ? eta : ''), '')}${step(3, prio ? tr('m.transportArrived') : tr('m.step4'), '')}`}</div>
     ${b ? `<div class="card"><div class="eyebrow" style="color:#0066cc">${esc(tr('m.safeExit'))}</div><div style="font:800 18px var(--head);letter-spacing:-0.03em">${esc(name(b.name))} · ${b.route.distanceM} ${esc(tr('ui.meters'))}</div>
       <button class="primary" id="sentRoute" style="flex:none;width:100%">${svg(NAV, '#fff', 18, 2.2)}${esc(tr('m.showRoute'))}</button></div>` : ''}
     <div class="spacer"></div>
@@ -561,7 +569,7 @@ function renderSent() {
   });
   if (left > 0 || (stage === 3 && etaLeft != null)) sentTimer = setTimeout(renderSent, 1000);
 }
-setInterval(() => { if (current?.id && app.dataset.screen === 'sent') pollSos(); }, 4000);
+setInterval(() => { if (current?.id) pollSos(); }, 2000); // also while on other screens, so the toast still arrives
 
 // ------------------------------------------------------------------ SMS fallback (no internet)
 let smsNumber = lsGet('smsNumber', '1234');

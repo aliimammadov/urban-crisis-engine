@@ -162,6 +162,7 @@ export class Store extends EventEmitter {
     } else if (b && !b.alertId && dispatched) stage = 4; // mission finished, brigade is back at base
     return {
       id: s.id, type: s.type, status: s.status, createdAt: s.createdAt, stage, priority: s.priority, needs: s.needs,
+      brigade: dispatched && b ? { name: b.name, kind: b.kind } : null, // public data only
       etaSec,
       etaMin: etaSec != null ? Math.max(1, Math.ceil(etaSec / 60)) : dispatched?.result?.etaMin ?? null,
       cancelMsLeft: s.status === 'open' ? Math.max(0, s.createdAt + this.cancelWindowMs - this.now()) : 0,
