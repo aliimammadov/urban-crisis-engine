@@ -26,6 +26,11 @@ export const DEFAULT_RULES = Object.freeze({
 export const ALERT_ACTION = 'RED_DISPATCH_AND_OPEN_POINT';
 export const PRIORITY_ACTION = 'DISPATCH_ACCESSIBLE_TRANSPORT';
 
+// Which kind of brigade an emergency needs, best first. Anything else free is still offered (as a worse match).
+const KIND_PREF = { FIRE: ['fire', 'rescue'], MEDICAL: ['medical'], COLLAPSE: ['rescue', 'fire'], FLOOD: ['rescue', 'fire'] };
+const TIE_ORDER = ['MEDICAL', 'FIRE', 'COLLAPSE', 'FLOOD']; // when a cluster mixes types equally, the life-threatening one wins
+const MATCH = ['exact', 'secondary', 'any', 'special'];
+
 /**
  * Critical Crisis Algorithm.
  *  Rule A: >= minDistinctReporters different citizens send SOS within windowMs, either
@@ -225,24 +230,57 @@ export class CrisisEngine {
   /** What approve() WOULD do, without doing it (shown to the dispatcher before the click). */
   plan(alert) {
     if (alert.type === 'PRIORITY_SOS') return this.#priorityPlan(alert);
-    const free = alert.level === 'amber' ? [] : [...this.store.brigades.values()].filter((b) => b.status === 'available');
-    const b = nearest(alert.center, free);
+    const cands = this.candidates(alert);
+    const auto = cands.find((c) => c.match !== 'special'); // reserved vehicles (accessible transport) are never auto-picked here
     const reserves = [...this.store.points.values()].filter((p) => !p.active);
     const np = nearest(alert.center, reserves);
     return {
-      brigade: b ? { id: b.item.id, name: b.item.name, etaMin: this.#eta(b.distance) } : null,
+      brigade: auto ? { id: auto.id, name: auto.name, kind: auto.kind, etaMin: auto.etaMin, match: auto.match } : null,
+      wantedKind: alert.level === 'amber' ? null : (KIND_PREF[this.#wantedType(alert)] ?? ['rescue'])[0],
+      candidates: cands,
       point: np ? { id: np.item.id, name: np.item.name, capacity: np.item.capacity } : null,
     };
   }
 
+  /** The emergency type that decides which kind of brigade is wanted (null = crowd control -> rescue). */
+  #wantedType(alert) {
+    if (alert.type !== 'SOS_CLUSTER') return null;
+    const ids = new Set(alert.sosIds ?? []);
+    const counts = {};
+    for (const s of this.store.sos.slice(-5000)) if (ids.has(s.id)) counts[s.type] = (counts[s.type] ?? 0) + 1;
+    let best = null;
+    for (const t of TIE_ORDER) if (counts[t] && (best === null || counts[t] > counts[best])) best = t;
+    return best;
+  }
+
+  /**
+   * Every free brigade, ranked for this alert: right kind first (then the second-best kind, then any other),
+   * nearest first inside a rank. `special` = reserved for priority citizens (accessible transport).
+   * This is what the dispatcher sees in the brigade picker; the first non-special entry is the automatic choice.
+   */
+  candidates(alert) {
+    if (alert.level === 'amber') return [];
+    const avail = [...this.store.brigades.values()].filter((b) => b.status === 'available');
+    let rankOf;
+    if (alert.type === 'PRIORITY_SOS') {
+      rankOf = (b) => (b.kind === 'accessible_transport' ? 0 : b.kind === 'medical' ? 1 : 3);
+    } else {
+      const pref = KIND_PREF[this.#wantedType(alert)] ?? ['rescue'];
+      rankOf = (b) => (b.kind === 'accessible_transport' ? 3 : pref.indexOf(b.kind) >= 0 ? pref.indexOf(b.kind) : 2);
+    }
+    return avail
+      .map((b) => ({ b, rank: rankOf(b), distance: haversine(b.home, alert.center) }))
+      .sort((x, y) => x.rank - y.rank || x.distance - y.distance)
+      .map(({ b, rank, distance }) => ({ id: b.id, name: b.name, kind: b.kind, etaMin: this.#eta(distance), distanceM: Math.round(distance), match: MATCH[Math.min(rank, 3)] }));
+  }
+
   /** Accessible transport first; if none is free, the nearest medical brigade (flagged as fallback). */
   #priorityPlan(alert) {
-    const avail = [...this.store.brigades.values()].filter((b) => b.status === 'available');
-    let v = nearest(alert.center, avail.filter((b) => b.kind === 'accessible_transport'));
-    let fallback = false;
-    if (!v) { v = nearest(alert.center, avail.filter((b) => b.kind === 'medical')); fallback = !!v; }
+    const cands = this.candidates(alert);
+    const v = cands.find((c) => c.match === 'exact' || c.match === 'secondary');
     return {
-      brigade: v ? { id: v.item.id, name: v.item.name, kind: v.item.kind, etaMin: this.#eta(v.distance), fallback } : null,
+      brigade: v ? { id: v.id, name: v.name, kind: v.kind, etaMin: v.etaMin, fallback: v.match !== 'exact', match: v.match } : null,
+      candidates: cands,
       point: null,
       accessiblePoint: this.#accessiblePoint(alert.center),
     };
@@ -303,14 +341,25 @@ export class CrisisEngine {
   }
 
   /** One-click decision: dispatch nearest free brigade + open nearest reserve assembly point. */
-  approve(alertId, actor = 'dispatcher') {
+  approve(alertId, actor = 'dispatcher', { brigadeId } = {}) {
     const alert = this.store.alerts.find((a) => a.id === alertId);
     if (!alert) throw new AppError(404, 'ALERT_NOT_FOUND');
     if (alert.status === 'approved') return alert; // idempotent
     if (alert.status !== 'open') throw new AppError(409, 'ALERT_NOT_OPEN');
 
     const p = this.plan(alert);
-    const b = p.brigade ? this.store.brigades.get(p.brigade.id) : null;
+    let b = p.brigade ? this.store.brigades.get(p.brigade.id) : null;
+    // The dispatcher may overrule the automatic choice with any FREE brigade (their call, not ours).
+    let manual = false;
+    if (brigadeId != null) {
+      if (typeof brigadeId !== 'string' || alert.level === 'amber') throw new AppError(400, 'INVALID_BRIGADE');
+      const pick = this.store.brigades.get(brigadeId);
+      if (!pick) throw new AppError(404, 'BRIGADE_NOT_FOUND');
+      if (pick.status !== 'available') throw new AppError(409, 'BRIGADE_NOT_AVAILABLE');
+      manual = pick.id !== b?.id;
+      b = pick;
+    }
+    const match = b ? p.candidates.find((c) => c.id === b.id)?.match ?? 'any' : null;
     if (b) {
       const dist = haversine(b.home, alert.center);
       b.status = 'dispatched';
@@ -327,8 +376,9 @@ export class CrisisEngine {
     this.store.guard?.reward(alert.sosIds ?? []); // corroborated reporters gain trust
     alert.approvedAt = this.store.now();
     alert.approvedBy = actor;
-    alert.result = { brigadeId: b?.id ?? null, openedPointId: np?.id ?? null, etaMin: p.brigade?.etaMin ?? null };
-    if (alert.type === 'PRIORITY_SOS') alert.result = { ...alert.result, accessible: true, fallback: !!p.brigade?.fallback, accessiblePointId: p.accessiblePoint?.id ?? null };
+    const etaMin = b ? this.#eta(haversine(b.home, alert.center)) : null;
+    alert.result = { brigadeId: b?.id ?? null, openedPointId: np?.id ?? null, etaMin, manual, match };
+    if (alert.type === 'PRIORITY_SOS') alert.result = { ...alert.result, accessible: true, fallback: !!b && b.kind !== 'accessible_transport', accessiblePointId: p.accessiblePoint?.id ?? null };
     this.store.emit('change', 'alert');
     return alert;
   }

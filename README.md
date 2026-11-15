@@ -9,7 +9,7 @@ Zero-dependency prototype (Node ≥ 20, no `npm install`). Two modules in one se
 
 ```bash
 npm start            # http://localhost:3000   (PORT=… to change)
-npm test             # 144 tests, ~0.5s
+npm test             # 158 tests, ~0.5s
 docker compose up --build   # optional (Dockerfile written, image not built on the author's machine)
 npm run demo         # fires a SOS cluster + overcrowding + API outage (server must be running)
 npm run load         # load test (start server with SOS_BURST=100000 API_BURST=100000 to disable limits)
@@ -63,6 +63,7 @@ Add `?lang=az|en|ru` for localized error messages.
 * **Time machine**: replay the last 2 hours of the situation on the dispatcher map.
 * **API docs**: `/api/docs` (offline) and `/api/openapi.json`; a test keeps them in sync with the real routes.
 * **Priority-SOS role (reduced mobility / special care)**: a signed device can declare needs (wheelchair, reduced mobility, medical transport). Every SOS from it is automatically **Critical Priority #1**: one SOS raises an immediate alert at the top of the dispatcher list, the citizen gets an **accessible-only route** (ramped/step-free points, step-free road segments) and the dispatcher dispatches **accessible transport** (fallback: nearest medical brigade, flagged). Demo scenario: `priority_sos`.
+* **Brigade choice**: the system proposes the nearest FREE brigade of the right kind (fire -> fire, medical -> medical, collapse/flood -> rescue, mixed clusters by dominant type); the dispatcher sees every free brigade with kind, ETA and match flag and can overrule the proposal with any free one (`POST /api/alerts/:id/approve` with `brigadeId`, validated, logged as manual).
 * **Brigade lifecycle**: dispatched -> on scene -> returning -> available with live position/ETA on the map and in the citizen's progress screen (`brigadeTimeScale` speeds demos up).
 * **Decision log**: every dispatcher decision and every system alert event (no IPs/tokens/identities), `GET /api/decisions`, shown on the dashboard.
 * **Mass notification** (dispatcher -> citizens): evacuate / shelter / avoid area / all clear / custom text, targeted by city, district or radius; pull model (server never stores citizen locations); accessible users get an accessible point automatically; reach and read counters.

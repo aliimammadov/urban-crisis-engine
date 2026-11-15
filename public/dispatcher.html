@@ -52,6 +52,8 @@
   .bcprev { background:#f6f1ff; color:#43228a; border-radius:12px; padding:10px 12px; font-size:13.5px; line-height:1.4; min-height:20px; }
   .bch { border:1px solid var(--line); border-radius:12px; padding:8px 10px; margin-bottom:8px; font-size:13px; } .bch b { display:block; } .bch .meta { color:var(--muted); font-size:12px; display:flex; justify-content:space-between; gap:8px; align-items:center; margin-top:3px; }
   .mv { height:4px; background:var(--soft); border-radius:2px; margin-top:4px; overflow:hidden; } .mv i { display:block; height:100%; background:#0071e3; }
+  .pick { display:flex; gap:8px; align-items:center; font-size:12.5px; color:var(--muted); } .pick select { flex:1; min-width:0; font:inherit; font-size:13px; padding:7px 8px; border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--ink); }
+  .warnrow { background:#fff4de; color:#6b3f00; border-radius:10px; padding:8px 10px; font-size:12.5px; line-height:1.35; } .mtag { font-size:11px; font-weight:700; border-radius:999px; padding:1px 8px; background:#fff4de; color:#8a5a00; margin-left:4px; }
   .rel { border:1px solid var(--line); background:#fff; border-radius:8px; padding:3px 10px; font-size:12.5px; font-weight:600; }
   .kpis { display:flex; gap:12px; flex-wrap:wrap; } .kpi { flex:1 1 130px; background:#fff; border:1px solid var(--line); border-radius:16px; padding:12px 16px; } .kpi small { color:var(--muted); font-size:12px; } .kpi div { display:flex; align-items:baseline; gap:8px; } .kpi b { font:800 28px var(--head); letter-spacing:-0.04em; }
   #mapbox { position:relative; flex-grow:1; min-height:440px; border-radius:18px; overflow:hidden; border:1px solid var(--line); }
@@ -171,6 +173,7 @@ const TONE = { FIRE: ['#fdeceb', '#b4231a'], COLLAPSE: ['#fff1de', '#8f4700'], F
 let token = localStorage.getItem('dtoken') || '';
 let snap = null; let snapAt = 0; let es = null; let roads = [];
 let map; const L2 = {}; let rules = {};
+const picks = {}; // alertId -> brigade the dispatcher chose (survives the 1 s live re-renders)
 let bcBuiltFor = ''; // language + data the broadcast form was built for
 let scenarios = [];
 let replay = null;
@@ -393,15 +396,23 @@ function alertCard(a) {
       ? `${name(snap.points.find((p) => p.id === a.pointId)?.name)} · ${a.occupancyPct}% · ${fmt('d.fillingIn', { n: a.etaMin, pct: rules.overcrowdPct ?? 95, rate: a.ratePerMin })}`
       : `${name(snap.points.find((p) => p.id === a.pointId)?.name)} · ${a.occupancyPct}% · ${tr('d.exceeded')}`;
   const chips = Object.entries(a.typeCounts ?? {}).map(([t, n]) => `<span class="chip" style="background:${TONE[t][0]};color:${TONE[t][1]}">${esc(tr('sos.' + t))} ×${n}</span>`).join('');
-  const brig = a.plan?.brigade; const pt = a.plan?.point;
+  // Brigade the dispatcher is about to send: their pick if still free, else the system's proposal.
+  const cands = a.plan?.candidates ?? [];
+  const autoId = a.plan?.brigade?.id ?? null;
+  const selId = picks[a.id] && cands.some((c) => c.id === picks[a.id]) ? picks[a.id] : autoId;
+  const brig = cands.find((c) => c.id === selId) ?? null; const pt = a.plan?.point;
+  const matchTag = brig && brig.match !== 'exact' ? `<span class="mtag">⚠ ${esc(tr('d.match.' + brig.match))}</span>` : '';
+  const picker = !done && !amber && cands.length
+    ? `<label class="pick"><span>${esc(tr('d.pickBrigade'))}</span><select data-pick="${a.id}" aria-label="${esc(tr('d.pickBrigade'))}">${cands.map((c) => `<option value="${c.id}" ${c.id === selId ? 'selected' : ''}>${esc(c.name)} · ${esc(tr('brigade.kind.' + c.kind))} · ~${c.etaMin} ${esc(tr('d.min'))} · ${c.match === 'exact' ? '✓' : '⚠'} ${esc(tr('d.match.' + c.match))}</option>`).join('')}</select></label>${a.plan?.brigade && a.plan.brigade.match !== 'exact' && !prio ? `<div class="warnrow">${esc(tr('d.noExactBrigade'))}</div>` : ''}`
+    : '';
   const apt = a.plan?.accessiblePoint;
   const prioPlan = `<div class="plan"><div class="lbl" style="margin:0">${esc(tr('d.after'))}</div>
-        <div>${brig ? `<span style="color:#6d3fd8">▸</span><span><b>${esc(brig.name)}</b> ${esc(brig.fallback ? tr('d.accVehicleFallback') : tr('d.accVehicle'))} ~${brig.etaMin} ${esc(tr('d.min'))}</span>` : `<span>⚠</span><span>${esc(tr('d.noAccVehicle'))}</span>`}</div>
+        <div>${brig ? `<span style="color:#6d3fd8">▸</span><span><b>${esc(brig.name)}</b> ${esc(brig.kind !== 'accessible_transport' ? tr('d.accVehicleFallback') : tr('d.accVehicle'))} ~${brig.etaMin} ${esc(tr('d.min'))}${matchTag}</span>` : `<span>⚠</span><span>${esc(tr('d.noAccVehicle'))}</span>`}</div>
         <div>${apt ? `<span style="color:#1a9e55">▸</span><span>${esc(tr('d.accPoint'))}: <b>${esc(name(apt.name))}</b> · ${apt.distanceM} ${esc(tr('ui.meters'))} ${(apt.access ?? []).map((x) => `<span class="accfeat">${esc(tr('acc.' + x))}</span>`).join('')}</span>` : `<span>⚠</span><span>${esc(tr('d.noAccPoint'))}</span>`}</div></div>`;
   const planHtml = prio && !done ? prioPlan : done
-    ? `<div class="plan"><div>✓ <span><b>${esc(a.result.brigadeId ?? '-')}</b>${a.result.etaMin ? ` · ~${a.result.etaMin} ${esc(tr('d.min'))}` : ''}</span></div>${prio ? '' : `<div>✓ <span><b>${esc(name(snap.points.find((p) => p.id === a.result.openedPointId)?.name) ?? '-')}</b></span></div>`}</div>`
+    ? `<div class="plan"><div>✓ <span><b>${esc(snap.brigades.find((x) => x.id === a.result.brigadeId)?.name ?? a.result.brigadeId ?? '-')}</b>${a.result.etaMin ? ` · ~${a.result.etaMin} ${esc(tr('d.min'))}` : ''}${a.result.manual ? `<span class="mtag">${esc(tr('d.manualPick'))}</span>` : ''}</span></div>${prio ? '' : `<div>✓ <span><b>${esc(name(snap.points.find((p) => p.id === a.result.openedPointId)?.name) ?? '-')}</b></span></div>`}</div>`
     : `<div class="plan"><div class="lbl" style="margin:0">${esc(tr('d.after'))}</div>
-        ${amber ? '' : `<div>${brig ? `<span style="color:#0071e3">▸</span><span><b>${esc(brig.name)}</b> ${esc(tr('d.sendsBrigade'))} ~${brig.etaMin} ${esc(tr('d.min'))}</span>` : `<span>⚠</span><span>${esc(tr('d.noBrigade'))}</span>`}</div>`}
+        ${amber ? '' : `<div>${brig ? `<span style="color:#0071e3">▸</span><span><b>${esc(brig.name)}</b> <small>${esc(tr('brigade.kind.' + brig.kind))}</small> ${esc(tr('d.sendsBrigade'))} ~${brig.etaMin} ${esc(tr('d.min'))}${matchTag}</span>` : `<span>⚠</span><span>${esc(tr('d.noBrigade'))}</span>`}</div>`}
         <div>${pt ? `<span style="color:#1a9e55">▸</span><span><b>${esc(name(pt.name))}</b> ${esc(tr('d.opensPoint'))} ${pt.capacity}</span>` : `<span>⚠</span><span>${esc(tr('d.noReserve'))}</span>`}</div></div>`;
   const left = done ? Math.max(0, a.undoMsLeft - (Date.now() - snapAt)) : 0;
   const actions = done
@@ -411,18 +422,26 @@ function alertCard(a) {
     <div class="eyebrow"><span class="d"></span>${esc(prio ? '♿ ' + tr('d.priority') : amber ? tr('d.warning') : tr('d.redAlerts'))} · ${esc(where)}<time>${esc(ago(a.createdAt))}</time></div>
     <div class="atitle">${esc(prio ? tr('alert.PRIORITY_SOS_TITLE') : amber ? tr('alert.POINT_FILLING_TITLE') : tr('alert.RED_DISPATCH_AND_OPEN_POINT'))}</div>
     <div style="font-size:13.5px;color:var(--muted)">${esc(title)}</div>
-    ${prio ? `<div class="chips">${(a.needs ?? []).map((n) => `<span class="need">${esc(tr('m.need.' + n))}</span>`).join('')}</div>` : ''}${chips ? `<div class="chips">${chips}</div>` : ''}${planHtml}${actions}</article>`;
+    ${prio ? `<div class="chips">${(a.needs ?? []).map((n) => `<span class="need">${esc(tr('m.need.' + n))}</span>`).join('')}</div>` : ''}${chips ? `<div class="chips">${chips}</div>` : ''}${planHtml}${picker}${actions}</article>`;
 }
 
-function renderAlerts() {
+function renderAlerts(force = false) {
+  if (!force && document.activeElement?.matches?.('#alerts select')) return; // never close a dropdown the dispatcher is using
   const list = snap.alerts.filter((a) => a.status !== 'expired').sort((x, y) => (x.status === 'open' ? 0 : 1) - (y.status === 'open' ? 0 : 1) || (y.type === 'PRIORITY_SOS') - (x.type === 'PRIORITY_SOS') || (x.level === 'amber') - (y.level === 'amber') || (y.reporters ?? y.occupancyPct) - (x.reporters ?? x.occupancyPct));
   const open = list.filter((a) => a.status === 'open').length;
   $('alertCount').textContent = open; $('alertCount').style.display = open ? '' : 'none';
   $('alerts').innerHTML = list.length ? list.map(alertCard).join('') : `<div class="card small">${esc(tr('ui.noAlerts'))}</div>`;
-  $('alerts').querySelectorAll('[data-approve]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); act(async () => { b.disabled = true; await api('POST', `/api/alerts/${b.dataset.approve}/approve`, { token }); }); }));
+  $('alerts').querySelectorAll('[data-approve]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); act(async () => {
+    b.disabled = true;
+    const sel = $('alerts').querySelector(`[data-pick="${b.dataset.approve}"]`); // the brigade shown in the picker is the one that goes
+    try { await api('POST', `/api/alerts/${b.dataset.approve}/approve`, { token, body: sel ? { brigadeId: sel.value } : undefined }); }
+    finally { b.disabled = false; }
+  }); }));
+  $('alerts').querySelectorAll('[data-pick]').forEach((sel) => { sel.addEventListener('click', (e) => e.stopPropagation()); sel.addEventListener('change', () => { picks[sel.dataset.pick] = sel.value; renderAlerts(true); }); });
   $('alerts').querySelectorAll('[data-undo]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); act(async () => { b.disabled = true; await api('POST', `/api/alerts/${b.dataset.undo}/undo`, { token }); }); }));
   $('alerts').querySelectorAll('[data-focus]').forEach((c) => c.addEventListener('click', () => { const [la, ln] = c.dataset.focus.split(',').map(Number); map?.flyTo([la, ln], 15); }));
 }
+$('alerts').addEventListener('focusout', () => setTimeout(() => snap && renderAlerts(), 0)); // catch up on what was skipped while a dropdown was open
 setInterval(() => { if (snap?.alerts.some((a) => a.status === 'approved' && a.undoMsLeft - (Date.now() - snapAt) > -1000)) renderAlerts(); }, 500);
 
 function renderFeed() {
@@ -512,7 +531,7 @@ function renderBcHistory() {
 // ---------------------------------------------------------------- decision journal
 function renderJournal() {
   const items = snap.decisions ?? [];
-  const extra = (d) => d.details?.brigadeId ? ` · ${d.details.brigadeId}` : d.details?.name ? ` · ${d.details.name}` : d.details?.status ? ` · ${tr('brigade.' + d.details.status)}` : d.details?.type && d.action.startsWith('broadcast') ? ` · ${tr('bc.type.' + d.details.type)}` : d.details?.type && d.action === 'alert.created' ? ` · ${d.details.type === 'PRIORITY_SOS' ? tr('d.priority') : d.details.type === 'SOS_CLUSTER' ? tr('alert.SOS_CLUSTER') : tr('alert.POINT_OVERCROWD')}` : '';
+  const extra = (d) => d.details?.manual ? ` · ${d.details.brigadeId} · ${tr('d.manualPick')}` : d.details?.brigadeId ? ` · ${d.details.brigadeId}` : d.details?.name ? ` · ${d.details.name}` : d.details?.status ? ` · ${tr('brigade.' + d.details.status)}` : d.details?.type && d.action.startsWith('broadcast') ? ` · ${tr('bc.type.' + d.details.type)}` : d.details?.type && d.action === 'alert.created' ? ` · ${d.details.type === 'PRIORITY_SOS' ? tr('d.priority') : d.details.type === 'SOS_CLUSTER' ? tr('alert.SOS_CLUSTER') : tr('alert.POINT_OVERCROWD')}` : '';
   $('journal').innerHTML = items.length ? items.slice(0, 10).map((d) => `<div><i style="background:${d.actor === 'system' ? '#94a3b8' : '#0071e3'}"></i><span><b>${esc(tr('audit.' + d.action))}</b>${esc(extra(d))}<br><small>${esc(tr('role.' + d.actor))}</small></span><small>${new Date(d.t).toLocaleTimeString(state.lang, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</small></div>`).join('')
     : `<div class="small">${esc(tr('d.noDecisions'))}</div>`;
 }

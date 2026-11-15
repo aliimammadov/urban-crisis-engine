@@ -47,7 +47,12 @@ public/ (vanilla JS + Leaflet)  ──HTTP / SSE──▶  src/app.js (marşrutl
 - Hər ikisi qırmızı həyəcan yaradır: *"Qırmızı Həyəcan: Əlavə Xilasetmə Briqadası Göndər və Yeni Toplanış Nöqtəsi Aç"*.
 - **Təkrarsızlıq:** böyüyən klaster mövcud həyəcanı yeniləyir. Təsdiqlənmiş həyəcanın **əhatə etdiyi SOS-lar yeni dəlil sayılmır**: göndərişdən sonra gələn 1-2 SOS təkrar həyəcan yaratmır, lakin 4 yeni şəxsin SOS-u yeni hadisədir.
 - **Performans:** yeni SOS gələndə yalnız onun ətrafı və rayonu yenidən qiymətləndirilir (O(pəncərə), O(pəncərə²) deyil). İlk versiyada hər SOS bütün pəncərəni skan edirdi: yük testində p95 ≈ 960 ms idi, düzəlişdən sonra ≈ 12 ms.
-- **Təsdiq:** ən yaxın azad briqada göndərilir + ən yaxın ehtiyat məntəqə açılır. Əməliyyat idempotentdir. `plan()` eyni qərarı **əvvəlcədən** göstərir və test təsdiq edir ki, `approve()` tam olaraq `plan()`-ın vəd etdiyini edir. 10 saniyə ərzində `undo()` mümkündür.
+- **Təsdiq:** SOS növünə uyğun ən yaxın azad briqada göndərilir (bax: 5.1.1) + ən yaxın ehtiyat məntəqə açılır. Əməliyyat idempotentdir. `plan()` eyni qərarı **əvvəlcədən** göstərir və test təsdiq edir ki, `approve()` tam olaraq `plan()`-ın vəd etdiyini edir. 10 saniyə ərzində `undo()` mümkündür.
+
+#### 5.1.1 Briqada seçimi (`crisis.js`: `candidates()`, `plan()`, `approve()`)
+**Avtomatik seçim növə görə aparılır.** Klasterdəki SOS növlərindən üstünlük təşkil edəni əsas götürülür (bərabərlikdə həyati təhlükəli olan qalib gəlir: tibbi > yanğın > dağıntı > sel). Tələb olunan briqada növü: yanğın → `fire` (sonra `rescue`), tibbi → `medical`, dağıntı və sel → `rescue` (sonra `fire`), məntəqə dolması (izdiham nəzarəti) → `rescue`. Bütün **azad** briqadalar belə sıralanır: düzgün növ, sonra əvəzedici növ, sonra istənilən növ; hər pillənin daxilində hadisə yerinə ən yaxın olan birinci. Əlçatan nəqliyyat adi həyəcana **avtomatik göndərilmir** (prioritet vətəndaşlar üçün ehtiyatdadır). Uyğun növdə azad briqada yoxdursa, əvəzedici təklif olunur və dispetçerə sarı xəbərdarlıqla bildirilir.
+
+**Dispetçer avtomatik seçimi üstələyə bilər.** Həyəcan kartında briqada siyahısı var: hər seçimin yanında növ, ETA və "uyğun növ / əvəzedici növ / növ uyğun deyil" işarəsi. Dispetçer istənilən **azad** briqadanı seçə bilər (qərar onundur) və təsdiq düyməsi məhz seçilmiş briqadanı göndərir (`POST /api/alerts/:id/approve` + `{ brigadeId }`). Server yoxlayır: briqada mövcud olmalı (404), azad olmalı (409), amber xəbərdarlıqda briqada seçilmir (400). Rədd edilən cəhd heç nəyi dəyişmir. Seçim "əl ilə" kimi işarələnir (`result.manual`, `result.match`), qərar jurnalında və təsdiqlənmiş kartda göstərilir. Canlı yeniləmələr (saniyədə bir) seçimi sıfırlamır və dispetçerin açıq saxladığı siyahı yenidən qurulmur.
 
 ### 5.2 Marşrutlaşdırma və yenidən marşrut (`routing.js`, `evacuation.js`)
 Yol şəbəkəsi sintetikdir: rayon və məntəqə mərkəzlərindən minimal örtük ağacı (bağlılığı zəmanət verir) + hər nöqtə üçün ən yaxın 3 qonşu (ehtiyat yollar). Dijkstra bağlı yolları atlayır, canlı tıxac əmsalını çəkiyə vurur. Vətəndaşın ətrafındakı 5 məntəqə üçün marşrut hesablanır. "Dolu" (≥90%) və ya əlçatmaz olanlar tövsiyədən çıxarılır, yenidən marşrut səbəbi (`POINT_FULL`, `ROAD_BLOCKED`, `POINT_FILLING_FAST`) vətəndaşa göstərilir.
@@ -114,7 +119,7 @@ Dizayn istiqaməti: DevLink-in təmiz dili (`#0071e3`, Plus Jakarta Sans/Inter, 
 - Dispetçer: təsdiqdən əvvəl nəticə önbaxışı, 10 san. geri qaytarma, karantin siyahısı + "Burax", hücum/artım xəbərdarlığı, ssenari paneli, zaman maşını.
 
 ## 7. Keyfiyyət və test
-- **352 açar/dil, 144 avtomatik test** (`npm test`, ~0,5 san.): alqoritm sərhəd halları (dəqiq 95%, eyni şəxsin təkrar SOS-u, 5 dəqiqədən köhnə SOS), idempotentlik, geri qaytarma, marşrut ehtiyatı, auth/rollar, sürət limiti, saxta SOS ssenariləri, real kütləvi hadisədə heç kimin bloklanmaması, OpenAPI ilə real marşrut cədvəlinin uyğunluğu, dillərin eyni açar dəstinə malik olması.
+- **367 açar/dil, 158 avtomatik test** (`npm test`, ~0,5 san.): alqoritm sərhəd halları (dəqiq 95%, eyni şəxsin təkrar SOS-u, 5 dəqiqədən köhnə SOS), idempotentlik, geri qaytarma, marşrut ehtiyatı, auth/rollar, sürət limiti, saxta SOS ssenariləri, real kütləvi hadisədə heç kimin bloklanmaması, OpenAPI ilə real marşrut cədvəlinin uyğunluğu, dillərin eyni açar dəstinə malik olması.
 - **Yük testi** (`npm run load`, lokal, 50 paralel, SOS + təxliyyə sorğusu qarışığı): ~5 000+ sorğu/san., p95 ≈ 16 ms.
 - Dispetçer paneli real Chrome-da (başsız rejim) ssenarilərlə yoxlanılıb. Mobil ana ekran render yoxlanılıb; geri sayım, "göndərildi" və təsdiq ekranlarının əl ilə klik testi aparılmayıb.
 - `Dockerfile` və `docker-compose.yml` hazırdır; image-in tərkibi və healthcheck əmri təmiz qovluqda əl ilə təkrarlanıb, lakin bu maşında Docker daemon işləmədiyi üçün **image real build edilməyib**.
@@ -146,6 +151,7 @@ Dizayn istiqaməti: DevLink-in təmiz dili (`#0071e3`, Plus Jakarta Sans/Inter, 
 - Cihaz kimliyi telefon/OTP ilə bağlı deyil. Saxtakar ayrı IP-lərdən çoxlu imzalı cihaz yaradıb gözləyərsə, müdafiəni keçə bilər. IP əsaslı təhlil CGNAT arxasında zəifdir (buna görə təqsirkar yalnız imzasız və ya yeni cihazlar sayılır).
 - Xəritə plitələri OpenStreetMap-dən yüklənir (internetsiz xəritə fonu boş görünür, marşrutlar və məntəqələr isə çəkilir). Leaflet lokaldır.
 - SMS gateway simulyasiyadır (real operator inteqrasiyası yoxdur). SMS-də yer (rayon və ya koordinat) verilməsə SOS yaradılmır, cavabla yer soruşulur. Kütləvi bildiriş "pull" modelidir: tətbiq açıq olmayanda push bildirişi göndərilmir (real yerləşdirmədə Web Push/FCM lazımdır).
+- Briqada seçimində məsafə düz xətlə (bazadan hadisə yerinə) hesablanır, yol şəbəkəsi və bağlı yollar nəzərə alınmır. Bir həyəcana bir briqada göndərilir (böyük hadisə üçün çoxlu briqada hələ yoxdur).
 - Dolma sürəti xətti ekstrapolyasiyadır. Qəfil dəyişikliklərdə (axın dayanması) proqnoz gec yenilənir (5 dəqiqəlik pəncərə).
 
 ## 10. Gələcək inkişaf

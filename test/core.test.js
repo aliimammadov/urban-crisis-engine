@@ -107,7 +107,7 @@ test('approve: works even when no brigade/reserve left (result nulls, no crash)'
   for (const p of app.store.points.values()) p.active = true;
   ['c1', 'c2', 'c3', 'c4'].forEach((c) => sos(app, c));
   const res = app.crisis.approve(app.store.alerts[0].id);
-  assert.deepEqual(res.result, { brigadeId: null, openedPointId: null, etaMin: null });
+  assert.deepEqual(res.result, { brigadeId: null, openedPointId: null, etaMin: null, manual: false, match: null });
 });
 
 test('marking safe resolves the citizen SOS', () => {
