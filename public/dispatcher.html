@@ -45,7 +45,7 @@
   .sc button { border:0; background:var(--blue); color:#fff; border-radius:8px; padding:5px 12px; font-size:12.5px; font-weight:600; }
   .tm { display:flex; align-items:center; gap:12px; padding:10px 14px; } .tm input { flex-grow:1; accent-color:var(--blue); } .tmlabel { font-size:13px; color:var(--muted); min-width:190px; text-align:right; }
   .tmbtn { border:1px solid var(--line); background:#fff; border-radius:10px; padding:6px 12px; font-size:13px; font-weight:600; white-space:nowrap; } .tmbtn.live { background:var(--blue); color:#fff; border-color:var(--blue); }
-  .replaybanner { position:absolute; left:50%; transform:translateX(-50%); top:12px; z-index:1000; background:#fff4de; color:#6b3f00; border:1.5px solid #f2d596; border-radius:999px; padding:6px 14px; font-size:12.5px; font-weight:600; box-shadow:0 1px 3px rgba(0,0,0,.12); }
+  .replaybanner { position:absolute; left:50%; transform:translateX(-50%); top:12px; max-width:86%; text-align:center; z-index:1000; background:#fff4de; color:#6b3f00; border:1.5px solid #f2d596; border-radius:999px; padding:6px 14px; font-size:12.5px; font-weight:600; box-shadow:0 1px 3px rgba(0,0,0,.12); }
   .alert.priority { border-color:#7c3aed; background:#fbf9ff; box-shadow:0 0 0 3px rgba(124,58,237,.12); } .alert.priority .eyebrow { color:#43228a; } .alert.priority .eyebrow .d { background:#7c3aed; } .alert.priority .approve { background:#6d3fd8; }
   .need { background:#ede4ff; color:#43228a; border-radius:999px; padding:3px 10px; font-size:12px; font-weight:600; } .accfeat { background:#f3edff; color:#43228a; border-radius:999px; padding:1px 8px; font-size:11.5px; font-weight:600; margin-left:4px; }
   .rel { border:1px solid var(--line); background:#fff; border-radius:8px; padding:3px 10px; font-size:12.5px; font-weight:600; }
@@ -166,6 +166,7 @@ const ago = (t) => { const m = Math.max(0, Math.round((Date.now() - t) / 60000))
 
 function render() {
   if (!snap) return;
+  checkReplayAlerts();
   const apiDown = snap.chaos.externalDown;
   $('apiPill').className = `pill ${apiDown ? 'bad' : 'ok'}`; $('apiPill').textContent = apiDown ? tr('d.apiDown') : tr('d.apiOk');
   renderAbuse(); renderAlerts(); renderFeed(); renderQuarantine(); renderKpis(); renderSide(); drawMap();
@@ -199,6 +200,13 @@ function renderScenarios() {
 
 // ---------------------------------------------------------------- time machine
 const fmtT = (t) => new Date(t).toLocaleTimeString(state.lang, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+// Safety nets: replay must never hide the present. Idle paused replay -> live; a NEW alert -> live immediately.
+setInterval(() => { if (replay && !replay.timer && Date.now() - replay.touched > 30_000) leaveReplay(); }, 5000);
+function checkReplayAlerts() {
+  if (!replay || !snap) return;
+  if (snap.alerts.some((a) => a.status === 'open' && !replay.known.has(a.id))) { leaveReplay(); toast(tr('d.newAlertLive')); }
+}
+
 function renderTm() {
   $('tmPlay').textContent = replay?.timer ? `⏸ ${tr('d.pause')}` : `▶ ${tr('d.play')}`;
   $('tmLive').textContent = `● ${tr('d.backToLive')}`; $('tmLive').className = 'tmbtn live'; $('tmLive').hidden = !replay;
@@ -210,7 +218,7 @@ async function enterReplay() {
   if (replay) return true;
   const h = await api('GET', '/api/dashboard/history?minutes=120', { token });
   if (!h.frames.length) { toast(tr('d.noHistory'), true); return false; }
-  replay = { frames: h.frames, i: h.frames.length - 1, timer: null };
+  replay = { frames: h.frames, i: h.frames.length - 1, timer: null, touched: Date.now(), known: new Set((snap?.alerts ?? []).filter((a) => a.status === 'open').map((a) => a.id)) };
   $('tmRange').max = h.frames.length - 1; $('tmRange').value = replay.i;
   return true;
 }
@@ -234,13 +242,21 @@ function drawFrame(f) {
   }
 }
 function showFrame(i) { replay.i = i; $('tmRange').value = i; drawFrame(replay.frames[i]); renderTm(); }
-$('tmRange').addEventListener('input', () => act(async () => { if (!(await enterReplay())) return; if (replay.timer) { clearInterval(replay.timer); replay.timer = null; } showFrame(Number($('tmRange').value)); }));
+$('tmRange').addEventListener('input', () => act(async () => {
+  if (!(await enterReplay())) return;
+  if (replay.timer) { clearInterval(replay.timer); replay.timer = null; }
+  replay.touched = Date.now();
+  const i = Number($('tmRange').value);
+  if (i >= replay.frames.length - 1) { leaveReplay(); return; } // slider at the right edge = now = live
+  showFrame(i);
+}));
 $('tmPlay').addEventListener('click', () => act(async () => {
   if (!(await enterReplay())) return;
   if (replay.timer) { clearInterval(replay.timer); replay.timer = null; renderTm(); return; }
   if (replay.i >= replay.frames.length - 1) replay.i = 0;
+  replay.touched = Date.now();
   showFrame(replay.i);
-  replay.timer = setInterval(() => { if (replay.i >= replay.frames.length - 1) { clearInterval(replay.timer); replay.timer = null; renderTm(); return; } showFrame(replay.i + 1); }, 250);
+  replay.timer = setInterval(() => { if (replay.i >= replay.frames.length - 1) { leaveReplay(); return; } showFrame(replay.i + 1); }, 250); // the replay ends where "now" begins: back to live
   renderTm();
 }));
 $('tmLive').addEventListener('click', leaveReplay);
