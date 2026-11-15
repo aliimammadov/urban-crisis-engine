@@ -114,9 +114,11 @@
   <div class="grow"></div>
   <div class="pill"><span class="live"></span><span id="clock"></span></div>
   <div class="pill ok" id="apiPill"></div>
+  <div class="pill" id="who" style="display:none"></div><button id="logout" class="pill" style="display:none;cursor:pointer;border:0"></button>
   <select id="lang"><option value="az">AZ</option><option value="en">EN</option><option value="ru">RU</option></select>
 </header>
 
+<div id="protect" style="display:none;background:#b4231a;color:#fff;padding:10px 18px;font:600 14px var(--head)"></div>
 <main>
   <section class="col left">
     <div class="h"><span><span id="tAlerts"></span><span class="count" id="alertCount">0</span></span><span class="small" id="tCritical"></span></div>
@@ -169,7 +171,7 @@
   </section>
 </main>
 
-<div id="login"><form id="loginForm"><h2 id="loginTitle"></h2><input id="token" type="password" autocomplete="off"><button type="submit" id="loginSubmit"></button><div class="small" id="loginErr"></div></form></div>
+<div id="login"><form id="loginForm"><h2 id="loginTitle"></h2><input id="user" autocomplete="username"><input id="token" type="password" autocomplete="current-password"><button type="submit" id="loginSubmit"></button><div class="small" id="loginErr"></div></form></div>
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script type="module">
@@ -177,7 +179,7 @@ import { api, esc, loadLang, name, pctColor, state, tr } from './common.js';
 
 const $ = (id) => document.getElementById(id);
 const TONE = { FIRE: ['#fdeceb', '#b4231a'], COLLAPSE: ['#fff1de', '#8f4700'], FLOOD: ['#e6f2fd', '#0a5cc2'], MEDICAL: ['#eaf7ee', '#0b7a42'] };
-let token = localStorage.getItem('dtoken') || '';
+let token = sessionStorage.getItem('jwt') || ''; let me = null; let refreshTimer = null;
 let snap = null; let snapAt = 0; let es = null; let roads = [];
 let map; const L2 = {}; let rules = {};
 const picks = {}; // alertId -> brigade the dispatcher chose (survives the 1 s live re-renders)
@@ -213,7 +215,7 @@ function statics() {
   $('tPend').textContent = tr('d.pending.title'); $('pendHint').textContent = tr('d.pending.hint');
   $('tSusp').textContent = tr('d.suspicious'); $('suspNote').textContent = tr('d.suspiciousNote');
   $('scSummary').textContent = tr('d.scenarios'); $('tManual').textContent = tr('d.manual');
-  $('loginTitle').textContent = tr('d.login.title'); $('loginSubmit').textContent = tr('d.login.submit'); $('token').placeholder = tr('d.login.token');
+  $('loginTitle').textContent = tr('d.login.title'); $('loginSubmit').textContent = tr('d.login.submit'); $('token').placeholder = tr('d.login.pass'); $('user').placeholder = tr('d.login.user'); $('logout').textContent = tr('d.logout');
   $('simSet').textContent = tr('d.sim.set'); $('simApiL').textContent = tr('d.sim.api'); $('tRouting').textContent = tr('d.sim.api');
   { const cur = $('simApi').value || snap?.chaos?.mode || 'ok'; $('simApi').innerHTML = ['ok', 'http503', 'slow', 'error'].map((m) => `<option value="${m}">${esc(tr('d.sim.api.' + m))}</option>`).join(''); $('simApi').value = cur; }
   $('roadRandom').textContent = tr('d.sim.closeRoad'); $('reset').textContent = tr('d.sim.reset');
@@ -230,19 +232,37 @@ function statics() {
 statics();
 
 // ---------------------------------------------------------------- login + stream
-function showLogin(msg = '') { $('login').classList.add('on'); $('loginErr').textContent = msg; $('token').value = token || 'admin-demo'; $('token').focus(); }
-$('loginForm').addEventListener('submit', (e) => { e.preventDefault(); token = $('token').value.trim(); localStorage.setItem('dtoken', token); connect(); });
+function showLogin(msg = '') { $('login').classList.add('on'); $('loginErr').textContent = msg; $('user').value ||= 'dispatcher'; $('token').value = ''; ($('user').value ? $('token') : $('user')).focus(); }
+function signOut(msg = '') { es?.close(); es = null; clearTimeout(refreshTimer); token = ''; me = null; sessionStorage.removeItem('jwt'); $('who').style.display = $('logout').style.display = 'none'; showLogin(msg); }
+function startSession(sess) {
+  token = sess.token; me = sess; sessionStorage.setItem('jwt', token);
+  $('who').textContent = `${sess.user} · ${sess.role}`; $('who').style.display = $('logout').style.display = '';
+  clearTimeout(refreshTimer); refreshTimer = setTimeout(async () => { try { startSession(await api('POST', '/api/auth/refresh', { token })); } catch { signOut(tr('d.sessionExpired')); } }, Math.max(30, sess.expiresInSec - 120) * 1000);
+}
+$('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try { startSession(await api('POST', '/api/auth/login', { body: { username: $('user').value.trim(), password: $('token').value } })); $('token').value = ''; connect(); }
+  catch (err) { $('loginErr').textContent = err.message; }
+});
+$('logout').addEventListener('click', async () => { try { await api('POST', '/api/auth/logout', { token }); } catch { /* already invalid */ } signOut(); });
+
+async function openStream() {
+  es?.close();
+  const { ticket } = await api('POST', '/api/auth/stream-ticket', { token });
+  es = new EventSource(`/api/stream?ticket=${encodeURIComponent(ticket)}`);
+  es.addEventListener('snapshot', async (ev) => { snap = JSON.parse(ev.data); snapAt = Date.now(); roads = await api('GET', '/api/roads').catch(() => roads); render(); });
+  es.onerror = () => { es.close(); setTimeout(() => token && openStream().catch(() => signOut(tr('d.sessionExpired'))), 2000); }; // tickets are single-use: ask for a new one
+}
 
 async function connect() {
   es?.close();
-  try { snap = await api('GET', '/api/dashboard', { token }); } catch (e) { showLogin(e.status === 401 || e.status === 403 ? e.message : ''); return; }
+  try { snap = await api('GET', '/api/dashboard', { token }); } catch (e) { signOut(e.status === 401 || e.status === 403 ? tr('d.sessionExpired') : ''); return; }
   $('login').classList.remove('on');
+  if (!me) { me = await api('GET', '/api/auth/me', { token }).catch(() => null); if (me) { $('who').textContent = `${me.user} · ${me.role}`; $('who').style.display = $('logout').style.display = ''; } }
   snapAt = Date.now(); roads = await api('GET', '/api/roads').catch(() => roads); rules = await api('GET', '/api/rules', { token }).catch(() => rules); if (rules.brigadeTimeScale) $('simSpeed').value = String(rules.brigadeTimeScale);
   scenarios = await api('GET', '/api/sim/scenarios', { token }).catch(() => []); // admin only; hidden otherwise
   renderScenarios(); render();
-  es = new EventSource(`/api/stream?token=${encodeURIComponent(token)}`);
-  es.addEventListener('snapshot', async (ev) => { snap = JSON.parse(ev.data); snapAt = Date.now(); roads = await api('GET', '/api/roads').catch(() => roads); render(); });
-  es.onerror = () => { /* EventSource reconnects by itself */ };
+  await openStream().catch(() => {});
 }
 setInterval(() => { $('clock').textContent = `${tr('d.live')} · ${new Date().toLocaleTimeString(state.lang)}`; }, 1000);
 
@@ -250,13 +270,19 @@ setInterval(() => { $('clock').textContent = `${tr('d.live')} · ${new Date().to
 const zoneName = (id) => name(snap.zones.find((z) => z.id === id)?.name) ?? '';
 const ago = (t) => { const m = Math.max(0, Math.round((Date.now() - t) / 60000)); return m < 1 ? tr('m.now') : `${m} ${tr('d.min')}`; };
 
+function renderProtection() {
+  const p = snap.protection; const el = $('protect');
+  if (!p?.flood) { el.style.display = 'none'; return; }
+  const l = p.last60s;
+  el.style.display = ''; el.innerHTML = `<b>${esc(tr('d.prot.title'))}</b> — ${esc(tr('d.prot.body'))}<div style="font-weight:500;opacity:.9;margin-top:3px">${esc(fmt('d.prot.stats', { attempts: l.attempts, limited: l.rateLimited, dups: l.duplicates, accepted: l.accepted }))} · ${esc(fmt('d.prot.ends', { s: p.floodEndsInSec }))}</div>`;
+}
 function render() {
   if (!snap) return;
   checkReplayAlerts();
   const apiDown = snap.chaos.externalDown;
   renderRouting(apiDown);
   if (snap.chaos?.mode && document.activeElement !== $('simApi')) $('simApi').value = snap.chaos.mode;
-  renderAbuse(); renderAlerts(); renderPending(); renderFeed(); renderQuarantine(); renderKpis(); renderSide(); renderBcHistory(); renderJournal(); drawMap();
+  renderProtection(); renderAbuse(); renderAlerts(); renderPending(); renderFeed(); renderQuarantine(); renderKpis(); renderSide(); renderBcHistory(); renderJournal(); drawMap();
   if (bcBuiltFor !== state.lang + snap.points.length + snap.zones.length) buildBcForm();
   if (replay) showFrame(replay.i);
 }

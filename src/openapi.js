@@ -23,9 +23,9 @@ export const ENDPOINTS = [
   { method: 'POST', path: '/api/session', tag: T.citizen, auth: 'public', summary: 'İmzalı cihaz kimliyi alır (IP üzrə sürət limiti var)', body: { deviceId: 'string (ixtiyari, əvvəlki kimliyi saxlamaq üçün)' }, response: '{ deviceId, token }' },
   {
     method: 'POST', path: '/api/sos', tag: T.citizen, auth: 'device',
-    summary: 'SOS göndərir. X-Device-Token olmadan da qəbul olunur (təsdiqsiz sayılır). SOS heç vaxt kimlik səbəbilə rədd edilmir.',
+    summary: 'SOS göndərir. X-Device-Token olmadan da qəbul olunur (təsdiqsiz sayılır). Sürət limiti: imzalı cihaz üçün cihaz üzrə, imzasız sorğu üçün IP üzrə + ümumi büdcə (429 + Retry-After). Dublikat filtri: eyni göndərənin eyni növ SOS-u 60 san. ərzində yeni siqnal yaratmır (200, duplicate: true, repeats). Axın (flood) zamanı imzasız SOS qəbul olunur, amma karantinə düşür.',
     body: { citizenId: 'string (imzalı token varsa nəzərə alınmır)', type: 'FIRE | COLLAPSE | FLOOD | MEDICAL', lat: 'number', lng: 'number', accuracy: 'number (metr, ixtiyari)', note: 'string ≤280', needs: 'string[] (ixtiyari, yalnız imzalı cihaz: wheelchair | reduced_mobility | medical_transport. Pis dəyərlər səssiz atılır)' },
-    response: '{ id, status, createdAt, districtId, verified, priority (1 = Kritik Prioritet), needs[] }',
+    response: '201 yeni | 200 dublikat: { id, duplicate, repeats, status, createdAt, districtId, verified, priority (1 = Kritik Prioritet), needs[] }',
   },
   { method: 'GET', path: '/api/broadcasts', tag: T.citizen, auth: 'public', summary: 'Dispetçerin göndərdiyi aktiv bildirişlər (yalnız vətəndaşın yerinə aid olanlar). Server vətəndaşın yerini saxlamır, tətbiq öz koordinatı ilə sorğu edir. Əlçatan istifadəçi üçün pandussuz məntəqə əlçatanla əvəzlənir', query: { lat: 'number', lng: 'number', accessible: '1 = əlçatan məntəqə əvəzləməsi (prioritet rol üçün avtomatik)' }, response: '{ broadcasts: [ { id, type, severity, text, point, substituted, expiresAt } ] }' },
   { method: 'POST', path: '/api/broadcasts/:id/ack', tag: T.citizen, auth: 'public', summary: 'Vətəndaş bildirişi oxuduğunu təsdiqləyir (dispetçerdə "oxudu" sayğacı)', response: '{ id, acks }' },
@@ -37,8 +37,13 @@ export const ENDPOINTS = [
   { method: 'POST', path: '/api/safe', tag: T.citizen, auth: 'public', summary: '"Təhlükəsizəm": açıq SOS-ları bağlayır', body: { citizenId: 'string', lat: 'number?', lng: 'number?' }, response: '{ citizenId, resolvedSos }' },
   { method: 'POST', path: '/api/points/:id/checkin', tag: T.citizen, auth: 'public', summary: 'Məntəqəyə gəliş qeydi (doluluğu artırır)', body: { citizenId: 'string' }, response: 'məntəqə' },
 
+  { method: 'POST', path: '/api/auth/login', tag: T.dispatcher, auth: 'public', summary: 'Personal girişi. Uğurlu olarsa HS256 imzalı JWT qaytarır (rol tokenin içindədir). Ünvan və istifadəçi adı üzrə sürət limiti (brute-force qoruması)', body: { username: 'string', password: 'string' }, response: '{ token, tokenType: Bearer, expiresInSec, user, role, permissions[] }' },
+  { method: 'GET', path: '/api/auth/me', tag: T.dispatcher, auth: '@staff', summary: 'Cari istifadəçi, rol və icazələr', response: '{ user, role, permissions[], expiresAt }' },
+  { method: 'POST', path: '/api/auth/refresh', tag: T.dispatcher, auth: '@staff', summary: 'Etibarlı tokeni yenisi ilə əvəz edir (növbə ərzində yenidən giriş lazım olmasın)', response: '{ token, expiresInSec, … }' },
+  { method: 'POST', path: '/api/auth/logout', tag: T.dispatcher, auth: '@staff', summary: 'Çıxış: token dərhal ləğv olunur (deny-list)', response: '{ ok, revoked }' },
+  { method: 'POST', path: '/api/auth/stream-ticket', tag: T.dispatcher, auth: 'dashboard', summary: 'Canlı axın (SSE) üçün 30 saniyəlik birdəfəlik bilet. EventSource başlıq göndərə bilmir, JWT isə URL-ə yazılmır', response: '{ ticket, expiresInSec }' },
   { method: 'GET', path: '/api/dashboard', tag: T.dispatcher, auth: 'dashboard', summary: 'Canlı panel snapshot-ı: SOS, məntəqələr, briqadalar, həyəcanlar (plan, typeCounts, undoMsLeft), karantin, hücum nəticəsi', response: 'snapshot' },
-  { method: 'GET', path: '/api/stream', tag: T.dispatcher, auth: 'dashboard', summary: 'Server-Sent Events: hər dəyişiklikdə "snapshot" hadisəsi (?token=)', response: 'text/event-stream', sse: true },
+  { method: 'GET', path: '/api/stream', tag: T.dispatcher, auth: 'dashboard', summary: 'Server-Sent Events: hər dəyişiklikdə "snapshot" hadisəsi. ?ticket= (birdəfəlik bilet) və ya Authorization başlığı', response: 'text/event-stream', sse: true },
   { method: 'GET', path: '/api/dashboard/history', tag: T.dispatcher, auth: 'dashboard', summary: 'Zaman maşını: son N dəqiqənin kompakt kadrları', query: { minutes: 'number ≤240 (default 120)' }, response: '{ frames[], t0, t1, everyMs }' },
   { method: 'GET', path: '/api/decisions', tag: T.dispatcher, auth: 'dashboard', summary: 'Qərar jurnalı: kim, nə vaxt, hansı qərarı verdi (təsdiq, geri qaytarma, buraxma, yol, briqada, bildiriş) + sistem həyəcan hadisələri. IP/token/kimlik yoxdur', query: { limit: 'number ≤200 (default 30)' }, response: '{ decisions: [ { id, t, actor, action, target, details } ] }' },
   { method: 'POST', path: '/api/broadcasts', tag: T.dispatcher, auth: 'broadcast:send', summary: 'Kütləvi bildiriş: növ evacuate (məntəqəyə köçün) | shelter | avoid_area | all_clear (əhatə etdiyi xəbərdarlıqları ləğv edir) | custom. Hədəf: bütün şəhər, rayonlar və ya radius', body: { type: 'evacuate | shelter | avoid_area | all_clear | custom', severity: 'info | warning | critical (yalnız custom)', target: '{ kind: all } | { kind: districts, districts: [id] } | { kind: radius, lat, lng, radiusM }', pointId: 'string (evacuate üçün)', text: '{ az, en, ru } ≤280 (custom üçün məcburi)', expiresInMin: 'number 1..720 (default 30)' }, response: '{ id, type, severity, target, reach, acks, status }' },
@@ -65,7 +70,7 @@ export const ENDPOINTS = [
 
 const AUTH_TEXT = {
   public: 'açıq', device: 'ixtiyari X-Device-Token', dashboard: 'Bearer (dispetçer/müşahidəçi/admin)', 'alert:approve': 'Bearer (dispetçer/admin)',
-  'road:write': 'Bearer (dispetçer/admin)', 'brigade:write': 'Bearer (dispetçer/admin)', '*': 'Bearer (yalnız admin)',
+  '@staff': 'Bearer JWT (istənilən personal rolu)', 'road:write': 'Bearer (dispetçer/admin)', 'brigade:write': 'Bearer (dispetçer/admin)', '*': 'Bearer (yalnız admin)',
 };
 
 const toOpenApiPath = (p) => p.replace(/:(\w+)/g, '{$1}');
@@ -118,5 +123,5 @@ h1{margin:0 0 4px}h2{margin:32px 0 10px}article{background:#fff;border:1px solid
 header{display:flex;gap:10px;align-items:center;flex-wrap:wrap}header b{color:#fff;border-radius:6px;padding:2px 8px;font-size:12px}code{font:13px ui-monospace,Menlo,monospace}
 .auth{margin-left:auto;font-size:12px;color:#5f6470;background:#f4f5f7;border-radius:999px;padding:2px 10px}p{margin:6px 0}
 table{border-collapse:collapse;font-size:13px;margin:6px 0}caption{text-align:left;font-weight:600;color:#5f6470}td{border-top:1px solid #eef0f3;padding:3px 12px 3px 0;vertical-align:top}.resp{font-size:13px;color:#3d4350}</style></head>
-<body><h1>Urban Crisis Engine API</h1><div style="color:#5f6470">OpenAPI: <a href="/api/openapi.json">/api/openapi.json</a> · Səhv mesajları <code>?lang=az|en|ru</code> · Staff token: <code>Authorization: Bearer …</code></div>${sections}</body></html>`;
+<body><h1>Urban Crisis Engine API</h1><div style="color:#5f6470">OpenAPI: <a href="/api/openapi.json">/api/openapi.json</a> · Səhv mesajları <code>?lang=az|en|ru</code> · Personal: <code>POST /api/auth/login</code> → <code>Authorization: Bearer &lt;JWT&gt;</code></div>${sections}</body></html>`;
 }

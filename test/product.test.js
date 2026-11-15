@@ -190,7 +190,10 @@ test('journal: failed (rejected) actions are not logged as decisions; snapshot c
   const before = app.audit.items.length;
   assert.equal((await call('POST', '/api/alerts/nope/approve', { token: 'dispatcher-demo' })).status, 404);
   assert.equal((await call('POST', '/api/alerts/nope/approve', { token: 'observer-demo' })).status, 403);
-  assert.equal(app.audit.items.length, before);
+  const added = app.audit.items.slice(before);
+  assert.ok(!added.some((d) => d.action === 'alert.approve'), 'a failed action is never logged as a decision');
+  assert.deepEqual(added.map((d) => d.action), ['auth.denied'], 'the refused attempt of the observer is recorded as a security event');
+  assert.equal(added[0].actor, 'observer'); assert.equal(added[0].details.needs, 'alert:approve');
   cluster(app);
   assert.ok(app.store.snapshot && app.crisis.decorate(app.store.snapshot()) && true);
   const dash = await (await call('GET', '/api/dashboard', { token: 'dispatcher-demo' })).json();

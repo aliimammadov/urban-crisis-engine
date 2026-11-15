@@ -5,9 +5,10 @@ services:
       - "3000:3000"
     environment:
       # CHANGE THESE before any public deployment (defaults are demo values)
-      ADMIN_TOKEN: ${ADMIN_TOKEN:-admin-demo}
-      DISPATCHER_TOKEN: ${DISPATCHER_TOKEN:-dispatcher-demo}
-      OBSERVER_TOKEN: ${OBSERVER_TOKEN:-observer-demo}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin-demo}
+      DISPATCHER_PASSWORD: ${DISPATCHER_PASSWORD:-dispatcher-demo}
+      OBSERVER_PASSWORD: ${OBSERVER_PASSWORD:-observer-demo}
+      JWT_SECRET: ${JWT_SECRET:-}
       TOKEN_SECRET: ${TOKEN_SECRET:-}
       # set to 1 only when a trusted reverse proxy sets X-Forwarded-For
       TRUST_PROXY: ${TRUST_PROXY:-0}

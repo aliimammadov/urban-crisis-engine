@@ -15,7 +15,7 @@ npm run demo         # fires a SOS cluster + overcrowding + API outage (server m
 npm run load         # load test (start server with SOS_BURST=100000 API_BURST=100000 to disable limits)
 ```
 
-Tokens (demo): `admin-demo`, `dispatcher-demo`, `observer-demo` (override with `ADMIN_TOKEN`, `DISPATCHER_TOKEN`, `OBSERVER_TOKEN`).
+Staff sign-in (JWT, demo accounts): `admin / admin-demo`, `dispatcher / dispatcher-demo`, `observer / observer-demo`. Override with `ADMIN_PASSWORD`, `DISPATCHER_PASSWORD`, `OBSERVER_PASSWORD`; set `JWT_SECRET` (and optionally `JWT_TTL_MIN`) in production. Opaque static tokens are off unless `ALLOW_STATIC_TOKENS=1` (tests only).
 
 ## Critical Crisis Algorithm (`src/crisis.js`)
 * **Rule A** – ≥ 4 *distinct* citizens send SOS within 5 min, inside one district **or** within 500 m → RED alert.
@@ -51,7 +51,7 @@ Routing is a **simulated** external map/traffic API (`RoadGraph` with live closu
 ## API (short)
 Public: `GET /api/evacuation?lat&lng` (or `?district=`), `GET /api/points`, `GET /api/roads`, `POST /api/sos`, `POST /api/safe`, `POST /api/points/:id/checkin`, `GET /api/i18n/:lang`
 Citizen extras: `GET /api/sos/:id` (progress stage 0-3 + ETA), `POST /api/sos/:id/cancel` (owner only, 60 s window)
-Dispatcher: `GET /api/dashboard` (alerts carry `plan`, `typeCounts`, `undoMsLeft`), `POST /api/alerts/:id/undo` (10 s window), `GET /api/stream?token=` (SSE), `POST /api/alerts/:id/approve`, `POST /api/roads/:id/close|open|congestion`, `POST /api/brigades/:id/status`
+Dispatcher: `GET /api/dashboard` (alerts carry `plan`, `typeCounts`, `undoMsLeft`), `POST /api/alerts/:id/undo` (10 s window), `POST /api/auth/login` → JWT, `POST /api/auth/stream-ticket` → `GET /api/stream?ticket=` (SSE, one-time 30 s ticket), `POST /api/alerts/:id/approve`, `POST /api/roads/:id/close|open|congestion`, `POST /api/brigades/:id/status`
 Admin: `POST /api/sim/{occupancy,chaos,rules,reset}`
 Add `?lang=az|en|ru` for localized error messages.
 
@@ -78,3 +78,12 @@ Add `?lang=az|en|ru` for localized error messages.
 * The road network is synthetic (MST + nearest neighbours between districts/points), not real streets; routes are straight segments between nodes.
 * Device identity is server-signed but not tied to a phone number/OTP; a patient attacker with many real IPs could still mint trusted devices.
 * Map tiles / Leaflet load from CDN; without internet lists still work, map doesn't.
+
+## Challenge Drop 3: SOS flood / spam attack
+
+* **Rate limiting** (`src/shield.js`, `src/ratelimit.js`): signed device = own bucket (a crowd behind one Wi-Fi is not punished together); unsigned = bucket per IP + one global bucket (a botnet of many IPs still has a fixed budget). The limit runs before the body is read; refused requests get `429`.
+* **Duplicate filter** (`store.js`): same signed device (or claimed id) + same type within 60 s = the original SOS with a `repeats` counter, not a new signal.
+* **Flood mode**: more than 150 attempts in 10 s turns protection on. Unsigned SOS are still accepted (never silently dropped) but quarantined, so fakes cannot raise alerts. The dispatcher sees a red banner with live counters; signed devices are unaffected.
+* **JWT + RBAC** (`src/jwt.js`, `src/auth.js`): HS256 only (`alg: none` rejected), constant-time check, mandatory `exp`, logout revokes the token at once, scrypt password check with equal cost for unknown users, login brute-force limits. Roles: `admin` (everything), `dispatcher` (approve, dispatch, roads, brigades, broadcast), `observer` (read-only). Denied attempts go to the decision log (`auth.denied`).
+* **Latency**: tested in `test/security.test.js` (600 SOS plus dashboard reads at the same time, average < 300 ms); `npm run load` prints the average (locally about 5 ms at 16 000 req/s).
+* Demo: dispatcher panel as admin → Scenarios → "SOS flood (600 requests)".

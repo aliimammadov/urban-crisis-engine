@@ -9,8 +9,9 @@ const pct = (p) => (p.capacity > 0 ? (p.occupied / p.capacity) * 100 : 100);
 
 /** In-memory state of the city. Emits 'change' on any mutation, 'alert' on new alerts. */
 export class Store extends EventEmitter {
-  constructor(seed, { now = () => Date.now(), cancelWindowMs = 60_000 } = {}) {
+  constructor(seed, { now = () => Date.now(), cancelWindowMs = 60_000, dedupWindowMs = 60_000 } = {}) {
     super();
+    this.dedupWindowMs = dedupWindowMs;
     this.now = now;
     this.cancelWindowMs = cancelWindowMs;
     this.seed = seed;
@@ -34,6 +35,7 @@ export class Store extends EventEmitter {
     this.seq = 0;
     this.occSamples = new Map(); // pointId -> [{t, occ}] for inflow-rate forecasts
     for (const p of this.points.values()) this.recordOccupancy(p.id);
+    this.dedup = new Map(); // duplicate filter: key -> { id, at }
     this.quarantineVersion = 0; // bumped by AbuseGuard whenever a SOS is (un)quarantined
     this.guard?.reset?.();
     this.emit('change', 'reset');
@@ -90,6 +92,16 @@ export class Store extends EventEmitter {
     }
     if (!SOS_TYPES.includes(type)) throw new AppError(400, 'INVALID_SOS_TYPE');
     if (!isValidCoord(lat, lng)) throw new AppError(400, 'INVALID_COORDS');
+    // Duplicate filter: the same sender repeating the same emergency inside the window does not create a new
+    // signal; the original gets a repeat counter instead (panic re-taps, retries, spam loops).
+    const dupKeys = this.#dupKeys(citizenId.trim(), type, lat, lng, meta);
+    const original = this.#findDuplicate(dupKeys);
+    if (original) {
+      original.repeats = (original.repeats ?? 0) + 1;
+      original.lastRepeatAt = this.now();
+      meta.duplicate = true;
+      return original;
+    }
     const sos = {
       id: this.nextId('s'),
       citizenId: citizenId.trim(),
@@ -109,9 +121,13 @@ export class Store extends EventEmitter {
       quarantined: false,
       flags: [],
       // Priority #1 only for a SIGNED device whose profile role is "priority" (self-declared special-care need)
+      repeats: 0,
+      floodSuspect: !!meta.flood && !meta.verified, // arrived unsigned while a flood was being detected
       priority: meta.verified && meta.profile?.role === 'priority' ? 1 : 2,
       needs: meta.verified && meta.profile?.role === 'priority' ? [...meta.profile.needs] : [],
     };
+    for (const k of dupKeys) this.dedup.set(k, { id: sos.id, at: sos.createdAt });
+    if (this.dedup.size > 20_000) { const cut = this.now() - this.dedupWindowMs; for (const [k, v] of this.dedup) if (v.at < cut) this.dedup.delete(k); }
     this.sos.push(sos);
     if (this.sos.length > MAX_SOS) this.sos.splice(0, this.sos.length - MAX_SOS);
     this.safe.delete(sos.citizenId);
@@ -130,6 +146,28 @@ export class Store extends EventEmitter {
     this.profiles.set(deviceId, p);
     this.emit('change', 'profile');
     return p;
+  }
+
+  /**
+   * "The same sender" = the same identity: a signed device id, otherwise the claimed citizen id.
+   * Deliberately NOT "same address + same place": several real people behind one Wi-Fi standing together
+   * must stay separate signals. Spam that rotates identities is handled by the rate-limit lanes,
+   * bot detection and flood mode instead.
+   */
+  #dupKeys(citizenId, type, _lat, _lng, meta) {
+    return [meta.verified && meta.deviceId ? `d|${meta.deviceId}|${type}` : `c|${citizenId}|${type}`];
+  }
+
+  #findDuplicate(keys) {
+    const cut = this.now() - this.dedupWindowMs;
+    for (const k of keys) {
+      const hit = this.dedup.get(k);
+      if (!hit || hit.at < cut) continue;
+      for (let i = this.sos.length - 1; i >= 0 && this.sos[i].createdAt >= cut; i--) {
+        if (this.sos[i].id === hit.id) { if (this.sos[i].status === 'open') return this.sos[i]; break; } // cancelled / safe: a new SOS is a new emergency
+      }
+    }
+    return null;
   }
 
   findSos(id) {
@@ -307,7 +345,7 @@ export class Store extends EventEmitter {
   publicSos(s) {
     return {
       id: s.id, type: s.type, lat: s.lat, lng: s.lng, note: s.note, districtId: s.districtId, createdAt: s.createdAt,
-      status: s.status, verified: s.verified, source: s.source, trust: s.trust ?? null, flags: s.flags, quarantined: s.quarantined,
+      status: s.status, verified: s.verified, repeats: s.repeats ?? 0, source: s.source, trust: s.trust ?? null, flags: s.flags, quarantined: s.quarantined,
       priority: s.priority, needs: s.needs,
     };
   }

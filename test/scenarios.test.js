@@ -5,7 +5,7 @@ import { runScenario, SCENARIO_NAMES } from '../src/scenarios.js';
 
 function setup() {
   const app = createApp({ tickMs: 0 });
-  const run = (name) => runScenario(name, { store: app.store, graph: app.graph, resetAll: () => { for (const e of app.graph.edges.values()) { e.closed = false; } app.store.reset(); }, sms: app.sms, broadcasts: app.broadcasts });
+  const run = (name) => runScenario(name, { store: app.store, graph: app.graph, resetAll: () => { for (const e of app.graph.edges.values()) { e.closed = false; } app.store.reset(); }, sms: app.sms, broadcasts: app.broadcasts, shield: app.shield });
   return { ...app, run };
 }
 const open = (app, type) => app.store.alerts.filter((a) => a.type === type && a.status === 'open');
@@ -79,4 +79,13 @@ test('HTTP: scenarios are admin-only', async () => {
   const list = await (await fetch(`${base}/api/sim/scenarios`, { headers: { Authorization: 'Bearer admin-demo' } })).json();
   assert.deepEqual(list, SCENARIO_NAMES);
   app.server.closeAllConnections?.(); app.server.close();
+});
+
+test('scenario sos_flood: 600 fake SOS, protection mode on, rate limit engaged, no alert', () => {
+  const app = setup(); const res = app.run('sos_flood');
+  assert.equal(res.count, 600);
+  assert.ok(res.limited > 0, 'rate limit refused part of it');
+  const snap = app.store.snapshot();
+  assert.equal(app.shield.stats().flood, true);
+  assert.equal(open(app, 'SOS_CLUSTER').length, 0);
 });

@@ -26,4 +26,6 @@ const t0 = performance.now();
 await Promise.all(Array.from({ length: conc }, worker));
 const secs = (performance.now() - t0) / 1000;
 lat95.sort((a, b) => a - b);
+const avg = lat95.reduce((a, b) => a + b, 0) / lat95.length;
+console.log(`average latency ${avg.toFixed(1)} ms ${avg < 300 ? '(OK, under 300 ms)' : '(OVER 300 ms)'}`);
 console.log({ total, conc, secs: secs.toFixed(2), rps: Math.round(total / secs), p50: lat95[Math.floor(total * 0.5)].toFixed(1), p95: lat95[Math.floor(total * 0.95)].toFixed(1), codes });

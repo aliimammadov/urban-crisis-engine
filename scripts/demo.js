@@ -1,7 +1,10 @@
 // Demo driver: node scripts/demo.js [baseUrl]
 // Fires a SOS cluster in Nasimi (-> RED alert) and overfills a point (-> overcrowd alert).
 const base = process.argv[2] || 'http://localhost:3000';
-const admin = { Authorization: 'Bearer admin-demo', 'Content-Type': 'application/json' };
+// staff sign-in (JWT). Passwords: ADMIN_PASSWORD env var, default is the demo one.
+const login = await fetch(base + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'admin', password: process.env.ADMIN_PASSWORD || 'admin-demo' }) }).then((r) => r.json());
+if (!login.token) { console.error('login failed', login); process.exit(1); }
+const admin = { Authorization: `Bearer ${login.token}`, 'Content-Type': 'application/json' };
 const post = (path, body, headers = { 'Content-Type': 'application/json' }) =>
   fetch(base + path, { method: 'POST', headers, body: JSON.stringify(body ?? {}) }).then((r) => r.json());
 

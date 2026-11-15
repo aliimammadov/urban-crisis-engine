@@ -261,7 +261,7 @@ test('HTTP: profile endpoints, automatic priority SOS, accessible route by token
   assert.equal(unsigned.status, 201);
   assert.equal((await unsigned.json()).priority, 2);
   const junk = await call('POST', '/api/sos', { headers: { 'X-Device-Token': t2 }, body: { type: 'FIRE', lat: NAS.lat, lng: NAS.lng, needs: 'garbage' } });
-  assert.equal(junk.status, 201, 'a malformed optional field must never reject an SOS');
+  assert.ok([200, 201].includes(junk.status), 'a malformed optional field must never reject an SOS (200 = merged into the same device\'s open SOS)');
 
   // removing the role
   await call('POST', '/api/profile', { headers: H, body: { role: 'citizen' } });

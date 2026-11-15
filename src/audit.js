@@ -8,8 +8,8 @@ export class Audit {
     this.seq = 0;
   }
 
-  record({ actor, action, target = null, details = {} }) {
-    const entry = { id: ++this.seq, t: this.now(), actor, action, target, details };
+  record({ actor, by = null, action, target = null, details = {} }) {
+    const entry = { id: ++this.seq, t: this.now(), actor, by, action, target, details }; // actor = role, by = staff user name
     this.items.push(entry);
     if (this.items.length > this.max) this.items.splice(0, this.items.length - this.max);
     return entry;

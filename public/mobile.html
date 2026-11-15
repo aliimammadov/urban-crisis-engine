@@ -62,6 +62,7 @@
   .bar { height:8px; border-radius:4px; background:var(--soft); overflow:hidden; } .bar i { display:block; height:100%; }
   .btnrow { display:flex; gap:8px; }
   .primary { flex:1; height:54px; border:0; border-radius:16px; background:var(--blue); color:#fff; font:700 17px var(--head); display:flex; align-items:center; justify-content:center; gap:8px; text-decoration:none; }
+  .secondary:disabled { background:#e6f6ec; border-color:#bfe3cd; color:#0b7a42; cursor:default; }
   .secondary { width:112px; height:54px; border-radius:16px; border:1.5px solid var(--line); background:#fff; font:700 15px var(--head); }
   .alt { display:flex; align-items:center; gap:10px; padding:10px 2px; border-top:1px solid #eef0f3; font-size:14px; } .alt span { flex-grow:1; } .alt small { color:var(--muted); }
 
@@ -257,6 +258,7 @@ const svg = (d, c, s = 24, w = 1.9) => `<svg width="${s}" height="${s}" viewBox=
 const NAV = 'M4 11l16-7-7 16-2-7z';
 
 let pos = null; let acc = null; let manual = false; let rec = null; let lastBest = null;
+let checkedIn = lsGet('checkedIn', null); // point this device already said it is heading to
 const NEEDS = ['wheelchair', 'reduced_mobility', 'medical_transport'];
 let profile = lsGet('profile', { role: 'citizen', needs: [] }); // priority-SOS role (kept locally so it works offline)
 const isPriority = () => profile.role === 'priority' && profile.needs.length > 0;
@@ -433,10 +435,12 @@ function renderRoute() {
       <div class="eta"><b>${isDegraded() ? '≈ ' : ''}${b.route.etaMin}</b><span>${esc(rec.accessible ? tr('ui.eta') : tr('m.walkMin'))}</span></div></div>
     <div class="bar"><i style="width:${Math.min(100, b.occupancyPct)}%;background:${pctColor(b.occupancyPct)}"></i></div>
     <div class="btnrow"><a class="primary" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${b.lat},${b.lng}&travelmode=walking">${svg(NAV, '#fff', 20, 2.2)}${esc(tr('m.navigate'))}</a>
-      <button class="secondary" id="heading">${esc(tr('ui.checkin'))}</button></div>
+      <button class="secondary" id="heading" ${checkedIn === b.id ? 'disabled' : ''}>${esc(checkedIn === b.id ? '✓ ' + tr('m.headingDone') : tr('ui.checkin'))}</button></div>
     ${others.map((o) => `<div class="alt"><span>${esc(name(o.name))} <small>· ${o.route ? o.route.distanceM + ' ' + esc(tr('ui.meters')) : esc(tr('ui.status.unreachable'))}</small></span><b style="color:${pctColor(o.occupancyPct)}">${o.occupancyPct}%</b></div>`).join('')}`;
   $('heading').addEventListener('click', async () => {
-    try { await api('POST', `/api/points/${b.id}/checkin`, { body: { citizenId: citizenId() } }); buzz(100); toast(tr('ui.checkedIn')); refresh(); }
+    if (checkedIn === b.id) return;
+    $('heading').disabled = true; // one tap only, even before the server answers
+    try { await api('POST', `/api/points/${b.id}/checkin`, { body: { citizenId: citizenId() } }); checkedIn = b.id; lsSet('checkedIn', checkedIn); buzz(100); toast(tr('ui.checkedIn')); refresh(); }
     catch (e) { toast(e.message, true); refresh(); }
   });
   if (lastBest && lastBest !== b.id) { buzz([300, 100, 300]); toast(`${tr('m.newRoute')} ${name(b.name)}`); }

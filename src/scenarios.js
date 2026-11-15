@@ -2,7 +2,7 @@
 // (addSos -> abuse guard -> crisis rules), nothing is faked at the dashboard level.
 import { AppError } from './errors.js';
 
-export const SCENARIO_NAMES = ['priority_sos', 'sms_sos', 'broadcast_demo', 'api_slow', 'api_recover', 'cluster', 'fake_flood', 'mass_event', 'filling', 'overcrowd', 'api_outage', 'road_block', 'reset'];
+export const SCENARIO_NAMES = ['priority_sos', 'sms_sos', 'broadcast_demo', 'api_slow', 'api_recover', 'cluster', 'fake_flood', 'sos_flood', 'mass_event', 'filling', 'overcrowd', 'api_outage', 'road_block', 'reset'];
 
 // tiny deterministic PRNG so a scenario looks the same every run
 function rng(seed) {
@@ -13,7 +13,7 @@ const jitter = (r, m) => (r() - 0.5) * 2 * m; // metres -> degrees below (approx
 const DEG = 1 / 111_000;
 const TYPES = ['FIRE', 'COLLAPSE', 'FLOOD', 'MEDICAL'];
 
-export function runScenario(name, { store, graph, resetAll, sms, broadcasts, breaker }) {
+export function runScenario(name, { store, graph, resetAll, sms, broadcasts, breaker, shield }) {
   if (!SCENARIO_NAMES.includes(name)) throw new AppError(404, 'SCENARIO_NOT_FOUND');
   const r = rng(Date.now() & 0xffff);
   const now = store.now();
@@ -57,6 +57,19 @@ export function runScenario(name, { store, graph, resetAll, sms, broadcasts, bre
         );
       }
       return { name, count: 40 };
+    }
+    case 'sos_flood': {
+      // 600 fake SOS from 300 addresses in one burst, through the same shield the HTTP endpoint uses
+      const d = district('nasimi');
+      let accepted = 0; let limited = 0;
+      for (let i = 0; i < 600; i++) {
+        const ip = `203.0.${113 + (i % 3)}.${10 + (i % 100)}`;
+        if (shield && !shield.admit({ ip }).ok) { limited += 1; continue; }
+        const meta = { ip, verified: false, flood: shield?.floodActive() };
+        store.addSos({ citizenId: `sim-spam-${now}-${i}`, type: TYPES[i % 4], lat: d.lat + jitter(r, 300) * DEG, lng: d.lng + jitter(r, 300) * DEG, accuracy: 10 }, meta);
+        shield?.note(meta.duplicate ? 'duplicates' : 'accepted'); accepted += 1;
+      }
+      return { name, count: 600, accepted, limited };
     }
     case 'mass_event': {
       for (let i = 0; i < 40; i++) {

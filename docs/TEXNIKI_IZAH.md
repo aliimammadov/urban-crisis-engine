@@ -184,3 +184,13 @@ Dizayn istiqaməti: DevLink-in təmiz dili (`#0071e3`, Plus Jakarta Sans/Inter, 
 
 ## 10. Gələcək inkişaf
 Daimi yaddaş (JSON snapshot → DB), real küçə şəbəkəsi (OSM/rəsmi açıq məlumat), telefon nömrəsi/OTP ilə cihaz təsdiqi, çoxlu instans üçün paylanmış hadisə kanalı, dispetçer qərarlarının audit jurnalı.
+
+
+## Challenge Drop 3: SOS axını (spam hücumu) və təhlükəsizlik
+
+- **Sürət limiti** (`shield.js`): imzalı cihaz öz vedrəsi ilə, imzasız sorğu IP vedrəsi və ümumi (qlobal) vedrə ilə məhdudlaşır. Bir Wi-Fi arxasındakı real insanlar bir yerdə cəzalanmır, çoxlu IP-li botnet isə yenə sabit büdcədən çox göndərə bilmir. Limit sorğu gövdəsi oxunmamışdan işləyir, rədd olunan `429` alır.
+- **Dublikat filtri**: eyni imzalı cihaz + eyni növ, 60 saniyə ərzində yeni siqnal yaratmır, əsas SOS-a `repeats` sayğacı əlavə olunur.
+- **Axın (flood) rejimi**: 10 saniyədə 150-dən çox cəhd qoruma rejimini açır. İmzasız SOS-lar yenə qəbul olunur (heç vaxt səssiz atılmır), amma karantinə düşür və həyəcan yarada bilmir. Dispetçer qırmızı zolaqda canlı sayğacları görür. İmzalı cihazlar təsirlənmir.
+- **JWT + RBAC** (`jwt.js`, `auth.js`): yalnız HS256 (`alg: none` rədd olunur), imza `timingSafeEqual` ilə yoxlanır, `exp` məcburidir, çıxışda token dərhal ləğv olunur, parol scrypt ilə yoxlanır (naməlum istifadəçi də eyni vaxt aparır), giriş cəhdləri limitlidir. SSE üçün URL-də token yox, bir dəfəlik 30 saniyəlik bilet işlədilir. Rollar: `admin`, `dispatcher` (təsdiq, briqada, yol, bildiriş), `observer` (yalnız oxu). İcazəsiz cəhdlər qərar jurnalına (`auth.denied`) düşür.
+- **Gecikmə**: `test/security.test.js` 600 SOS + eyni anda panel sorğularında orta gecikmənin 300 ms-dən aşağı olduğunu yoxlayır. Yerli ölçmədə orta təxminən 5 ms.
+- Mühit dəyişənləri: `JWT_SECRET`, `JWT_TTL_MIN`, `ADMIN_PASSWORD`, `DISPATCHER_PASSWORD`, `OBSERVER_PASSWORD`.

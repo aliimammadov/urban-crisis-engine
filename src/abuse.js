@@ -47,6 +47,7 @@ export class AbuseGuard {
     if (g.flag) { sos.flags.push(g.flag); this.#quarantine(sos, null); }
     if (!sos.verified) sos.flags.push('unverified');
     if (d.trust <= TRUST.min + 0.05) this.#quarantine(sos, 'low_trust');
+    if (sos.floodSuspect) this.#quarantine(sos, 'flood');
     this.analyze();
     return sos;
   }
@@ -90,6 +91,17 @@ export class AbuseGuard {
     }
     this.verdict = { attack: v.attack, surge: v.surge, signals: v.signals, ratePerMin: v.ratePerMin, baselinePerMin: v.baselinePerMin, at: now };
     return this.verdict;
+  }
+
+  /** A flood was just recognised: unsigned signals that slipped in during the last seconds are quarantined too. */
+  quarantineRecentUnverified(windowMs = 15_000) {
+    const cut = this.store.now() - windowMs;
+    let n = 0;
+    for (let i = this.store.sos.length - 1; i >= 0 && this.store.sos[i].createdAt >= cut; i--) {
+      const s = this.store.sos[i];
+      if (!s.verified && !s.quarantined && !s.released && s.status === 'open') { this.#quarantine(s, 'flood'); n += 1; }
+    }
+    return n;
   }
 
   /** Human override: dispatcher says "this one is real". */

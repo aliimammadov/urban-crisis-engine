@@ -22,7 +22,9 @@ server.listen(port, () => {
   console.log(`Urban Crisis Engine  → http://localhost:${port}`);
   const lan = Object.values(networkInterfaces()).flat().find((i) => i && i.family === 'IPv4' && !i.internal)?.address;
   if (lan) console.log(`Mobile (same Wi-Fi)  → http://${lan}:${port}/mobile  (GPS needs HTTPS, use a tunnel)`);
-  console.log(`Dispatcher dashboard → http://localhost:${port}/dispatcher  (token: admin-demo / dispatcher-demo)`);
+  console.log(`Dispatcher dashboard → http://localhost:${port}/dispatcher  (sign in: dispatcher / dispatcher-demo, admin / admin-demo, observer / observer-demo)`);
+  const weak = [!process.env.JWT_SECRET && 'JWT_SECRET not set (a random one is used, sessions end on restart)', !(process.env.ADMIN_PASSWORD || process.env.ADMIN_TOKEN) && 'default demo passwords in use (set ADMIN_PASSWORD, DISPATCHER_PASSWORD, OBSERVER_PASSWORD)'].filter(Boolean);
+  for (const w of weak) console.warn(`  ! ${w}`);
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {

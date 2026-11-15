@@ -10,7 +10,9 @@ import { RoadGraph, RoutingService } from './routing.js';
 import { CircuitBreaker } from './resilience.js';
 import { EvacuationService } from './evacuation.js';
 import { CrisisEngine } from './crisis.js';
-import { Auth } from './auth.js';
+import { ANY_STAFF, Auth, defaultTokens } from './auth.js';
+import { SosShield } from './shield.js';
+import { randomBytes } from 'node:crypto';
 import { RateLimiter } from './ratelimit.js';
 import { Sessions } from './session.js';
 import { clientIp } from './net.js';
@@ -40,7 +42,10 @@ const MIME = {
 export function createApp({
   now = () => Date.now(),
   data = seed,
-  auth = new Auth(),
+  auth: authOpt,
+  // legacy opaque bearer tokens: OFF by default (staff must log in and use a JWT); tests/scripts may enable them
+  staticTokens = process.env.ALLOW_STATIC_TOKENS === '1',
+  jwtSecret,
   rules = {},
   limits = {},
   routingTimeoutMs = 1500, // hard deadline for the external map API (an answer slower than 5 s counts as an outage anyway)
@@ -54,6 +59,7 @@ export function createApp({
   smsNumber = process.env.SMS_NUMBER || '1234',
   trustProxy = process.env.TRUST_PROXY === '1',
 } = {}) {
+  const auth = authOpt ?? new Auth({ now, secret: jwtSecret, staticTokens: staticTokens ? defaultTokens() : null });
   const store = new Store(data, { now, cancelWindowMs });
   const graph = new RoadGraph([...data.districts, ...data.points]);
   const breaker = new CircuitBreaker({ now, ...breakerOpts });
@@ -72,6 +78,7 @@ export function createApp({
     snap.decisions = audit.recent(12);
     snap.broadcasts = broadcasts.recent(8);
     snap.deps = { routing: routing.status() };
+    snap.protection = shield.stats();
     return snap;
   };
   // The routing circuit changing state is operationally important: log it and refresh dashboards immediately.
@@ -95,7 +102,7 @@ export function createApp({
   moveTimer?.unref();
 
   // Time-driven pass: forecasts/expiries depend on the clock, not only on incoming events.
-  const ticker = tickMs > 0 ? setInterval(() => crisis.tick(), tickMs) : null;
+  const ticker = tickMs > 0 ? setInterval(() => { crisis.tick(); shield.tick(); }, tickMs) : null;
   ticker?.unref();
 
   // Re-evaluate crisis rules whenever SOS or occupancy change (cheap: windows are small).
@@ -104,9 +111,23 @@ export function createApp({
     else if (kind === 'occupancy') crisis.evaluate();
   });
 
-  const sosLimiter = new RateLimiter({ capacity: limits.sosBurst ?? 10, refillPerSec: limits.sosPerSec ?? 0.5, now });
+  const shield = new SosShield({ now, limits });
+  // a flood was recognised: quarantine what slipped in, withdraw alerts built on it, tell the dispatcher
+  shield.on('flood', (e) => {
+    if (e.on) {
+      const n = guard.quarantineRecentUnverified(15_000);
+      audit.record({ actor: 'system', action: 'protection.flood_on', details: { attemptsPer10s: e.attemptsPer10s, quarantined: n } });
+      crisis.tick();
+    } else audit.record({ actor: 'system', action: 'protection.flood_off', details: {} });
+    store.emit('change', 'protection');
+  });
+  store.on('change', (kind) => { if (kind === 'reset') shield.reset(); });
+  const loginLimiter = new RateLimiter({ capacity: limits.loginBurst ?? 5, refillPerSec: limits.loginPerSec ?? 0.1, now });   // per address AND per user name
+  const loginGlobal = new RateLimiter({ capacity: limits.loginGlobalBurst ?? 20, refillPerSec: limits.loginGlobalPerSec ?? 5, now }); // bounds password-hash CPU
+  const streamTickets = new Map(); // one-time tickets for EventSource (which cannot send an Authorization header)
   const sessionLimiter = new RateLimiter({ capacity: limits.sessionBurst ?? 20, refillPerSec: limits.sessionPerSec ?? 0.5, now });
   const apiLimiter = new RateLimiter({ capacity: limits.apiBurst ?? 200, refillPerSec: limits.apiPerSec ?? 100, now });
+  const staffLimiter = new RateLimiter({ capacity: limits.staffBurst ?? 600, refillPerSec: limits.staffPerSec ?? 300, now }); // per signed-in user
 
   // ---- SSE live feed -------------------------------------------------------
   const clients = new Set();
@@ -131,7 +152,28 @@ export function createApp({
   const spec = buildOpenApi();
   route('GET', '/api/openapi.json', () => spec);
   route('GET', '/api/docs', () => ({ raw: true, status: 200, contentType: 'text/html; charset=utf-8', body: renderDocs() }));
-  route('GET', '/api/health', () => ({ ok: true, time: now(), mode: routing.status().mode, dependencies: { routing: routing.status() } }));
+  route('GET', '/api/health', () => ({ ok: true, time: now(), mode: routing.status().mode, dependencies: { routing: routing.status() }, protection: { flood: shield.floodActive() } }));
+
+  // ---- staff authentication (JWT) ----
+  route('POST', '/api/auth/login', { preAuth: (c) => { if (!loginGlobal.take('all') || !loginLimiter.take(`ip:${c.ip}`)) throw new AppError(429, 'RATE_LIMITED'); } }, (c) => {
+    const { username, password } = c.body;
+    if (typeof username === 'string' && !loginLimiter.take(`user:${username.slice(0, 64)}`)) throw new AppError(429, 'RATE_LIMITED');
+    const session = auth.login(username, password);
+    if (!session) { audit.record({ actor: 'system', action: 'auth.login_failed', details: {} }); throw new AppError(401, 'INVALID_CREDENTIALS'); }
+    audit.record({ actor: session.role, by: session.user, action: 'auth.login', details: {} });
+    return session;
+  });
+  route('GET', '/api/auth/me', { perm: ANY_STAFF }, (c) => ({ user: c.user, role: c.role, permissions: auth.permissions[c.role] ?? [], expiresAt: c.identity.exp ? c.identity.exp * 1000 : null }));
+  route('POST', '/api/auth/refresh', { perm: ANY_STAFF }, (c) => auth.issue(c.user, c.role));
+  route('POST', '/api/auth/logout', { perm: ANY_STAFF, audit: 'auth.logout' }, (c) => ({ ok: true, revoked: auth.revoke(c.identity) }));
+  route('POST', '/api/auth/stream-ticket', { perm: 'dashboard' }, (c) => {
+    const t = now();
+    for (const [k, v] of streamTickets) if (v.exp <= t) streamTickets.delete(k);
+    if (streamTickets.size > 2000) throw new AppError(429, 'RATE_LIMITED');
+    const ticket = randomBytes(24).toString('base64url');
+    streamTickets.set(ticket, { role: c.role, exp: t + 30_000 });
+    return { ticket, expiresInSec: 30 };
+  });
   route('GET', '/api/i18n/:lang', (c) => ({ lang: resolveLang(c.params.lang), messages: dict[resolveLang(c.params.lang)] }));
   route('GET', '/api/config', () => ({ sosTypes: SOS_TYPES, languages: Object.keys(dict), rules: crisis.rules, sms: { number: smsNumber } }));
   route('GET', '/api/districts', () => store.districts);
@@ -152,14 +194,16 @@ export function createApp({
   route('POST', '/api/session', { limiter: sessionLimiter }, (c) => sessions.issue(c.body.deviceId));
 
   // An SOS is NEVER rejected because of identity problems: a bad/missing token only makes it "unverified".
-  route('POST', '/api/sos', { limiter: sosLimiter }, (c) => {
-    const verifiedId = sessions.verify(c.req.headers['x-device-token']);
+  route('POST', '/api/sos', { preAuth: (c) => { c.sosLane = shield.admit({ ip: c.ip, deviceId: c.deviceId }); if (!c.sosLane.ok) throw new AppError(429, 'RATE_LIMITED'); } }, (c) => {
+    const verifiedId = c.deviceId;
     const body = verifiedId ? { ...c.body, citizenId: verifiedId } : c.body;
     // The priority claim can travel with the SOS (offline queue); only a SIGNED device may make it and bad values are ignored, never an error.
     const inline = verifiedId ? sanitizeNeeds(c.body.needs) : [];
     if (inline.length) store.setProfile(verifiedId, { role: 'priority', needs: inline });
-    const sos = store.addSos(body, { ip: c.ip, deviceId: verifiedId ?? undefined, verified: !!verifiedId, profile: verifiedId ? store.getProfile(verifiedId) : null });
-    return { status: 201, body: { id: sos.id, status: sos.status, createdAt: sos.createdAt, districtId: sos.districtId, verified: sos.verified, priority: sos.priority, needs: sos.needs } };
+    const meta = { ip: c.ip, deviceId: verifiedId ?? undefined, verified: !!verifiedId, profile: verifiedId ? store.getProfile(verifiedId) : null, flood: c.sosLane.flood };
+    const sos = store.addSos(body, meta);
+    shield.note(meta.duplicate ? 'duplicates' : 'accepted');
+    return { status: meta.duplicate ? 200 : 201, body: { duplicate: !!meta.duplicate, repeats: sos.repeats, id: sos.id, status: sos.status, createdAt: sos.createdAt, districtId: sos.districtId, verified: sos.verified, priority: sos.priority, needs: sos.needs } };
   });
 
   route('GET', '/api/sos/:id', (c) => store.sosStatus(c.params.id));
@@ -191,10 +235,10 @@ export function createApp({
     const frames = history.since(Number(c.url.searchParams.get('minutes')) || 120);
     return { frames, t0: frames[0]?.t ?? null, t1: frames.at(-1)?.t ?? null, everyMs: 5000 };
   });
-  route('POST', '/api/alerts/:id/approve', { perm: 'alert:approve', audit: 'alert.approve', details: (o) => ({ type: o.type, brigadeId: o.result?.brigadeId ?? null, openedPointId: o.result?.openedPointId ?? null, etaMin: o.result?.etaMin ?? null, manual: !!o.result?.manual, match: o.result?.match ?? null }) }, (c) => crisis.approve(c.params.id, c.role, { brigadeId: c.body.brigadeId }));
+  route('POST', '/api/alerts/:id/approve', { perm: 'alert:approve', audit: 'alert.approve', details: (o) => ({ type: o.type, brigadeId: o.result?.brigadeId ?? null, openedPointId: o.result?.openedPointId ?? null, etaMin: o.result?.etaMin ?? null, manual: !!o.result?.manual, match: o.result?.match ?? null }) }, (c) => crisis.approve(c.params.id, c.user, { brigadeId: c.body.brigadeId }));
   // Send a brigade to ONE signal (no cluster alert needed). Optional brigadeId overrules the automatic, type-aware choice.
   route('POST', '/api/sos/:id/dispatch', { perm: 'alert:approve', audit: 'sos.dispatch', details: (o) => ({ type: o.sosType, brigadeId: o.result?.brigadeId ?? null, etaMin: o.result?.etaMin ?? null, manual: !!o.result?.manual, match: o.result?.match ?? null }) },
-    (c) => crisis.dispatchSos(c.params.id, c.role, { brigadeId: c.body.brigadeId }));
+    (c) => crisis.dispatchSos(c.params.id, c.user, { brigadeId: c.body.brigadeId }));
   route('POST', '/api/sos/:id/release', { perm: 'alert:approve', audit: 'sos.release' }, (c) => {
     const s = guard.release(c.params.id);
     store.emit('change', 'sos', s); // re-run crisis rules: a released SOS may now complete a cluster
@@ -232,7 +276,7 @@ export function createApp({
   };
   route('POST', '/api/sim/reset', { perm: '*', audit: 'sim.reset' }, () => { resetAll(); return { ok: true }; });
   route('GET', '/api/sim/scenarios', { perm: '*' }, () => SCENARIO_NAMES);
-  route('POST', '/api/sim/scenario', { perm: '*', audit: 'sim.scenario', details: (o) => ({ name: o.name }) }, (c) => runScenario(String(c.body.name ?? ''), { store, graph, resetAll, sms, broadcasts, breaker }));
+  route('POST', '/api/sim/scenario', { perm: '*', audit: 'sim.scenario', details: (o) => ({ name: o.name }) }, (c) => runScenario(String(c.body.name ?? ''), { store, graph, resetAll, sms, broadcasts, breaker, shield }));
 
   // ---- decision journal ----
   route('GET', '/api/decisions', { perm: 'dashboard' }, (c) => ({ decisions: audit.recent(Number(c.url.searchParams.get('limit')) || 30) }));
@@ -249,7 +293,7 @@ export function createApp({
   });
   route('POST', '/api/broadcasts/:id/ack', (c) => broadcasts.ack(c.params.id, clientKey(c)));
   route('POST', '/api/broadcasts', { perm: 'broadcast:send', audit: 'broadcast.send', details: (o) => ({ id: o.id, type: o.type, severity: o.severity, target: o.target.kind }) },
-    (c) => ({ status: 201, body: broadcasts.create(c.body, c.role) }));
+    (c) => ({ status: 201, body: broadcasts.create(c.body, c.user) }));
   route('POST', '/api/broadcasts/:id/cancel', { perm: 'broadcast:send', audit: 'broadcast.cancel' }, (c) => broadcasts.cancel(c.params.id));
 
   // ---- SMS fallback (simulated gateway) ----
@@ -319,6 +363,8 @@ export function createApp({
     };
 
     res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Cache-Control', 'no-store');
 
     try {
@@ -328,11 +374,23 @@ export function createApp({
       }
 
       const ip = clientIp(req, trustProxy);
-      if (!apiLimiter.take(ip)) throw new AppError(429, 'RATE_LIMITED');
+      // Who is calling? Decided once, before anything expensive (no body has been read yet).
+      const identity = auth.identify(req, url);                              // staff (JWT)
+      const deviceId = sessions.verify(req.headers['x-device-token']);       // signed citizen device
+      // General limiter is keyed by IDENTITY, so an attacker flooding from an address cannot lock out
+      // the dispatcher or signed citizens who happen to share that address (office / NAT / localhost demo).
+      const who = identity ? `u:${identity.sub}` : deviceId ? `d:${deviceId}` : `ip:${ip}`;
+      if (!(identity ? staffLimiter : apiLimiter).take(who)) throw new AppError(429, 'RATE_LIMITED');
 
-      // SSE stream (dispatcher)
+      // SSE stream (dispatcher). EventSource cannot send headers: it presents a one-time ticket.
       if (req.method === 'GET' && url.pathname === '/api/stream') {
-        const role = auth.roleFor(req, url);
+        const ticket = url.searchParams.get('ticket');
+        let role = null;
+        if (ticket) {
+          const t = streamTickets.get(ticket);
+          streamTickets.delete(ticket); // single use
+          if (t && t.exp > now()) role = t.role;
+        } else role = identity?.role ?? null; // Authorization header (or a legacy token when those are enabled)
         if (!role) throw new AppError(401, 'UNAUTHORIZED');
         if (!auth.can(role, 'dashboard')) throw new AppError(403, 'FORBIDDEN');
         if (clients.size >= 500) throw new AppError(429, 'RATE_LIMITED');
@@ -346,18 +404,25 @@ export function createApp({
       const r = routes.find((x) => x.method === req.method && x.re.test(url.pathname));
       if (!r) throw new AppError(404, 'NOT_FOUND');
 
+      // RBAC: every protected route names the permission it needs; the role comes from the verified token only.
       let role = 'citizen';
       if (r.opts.perm) {
-        role = auth.roleFor(req, url);
-        if (!role) throw new AppError(401, 'UNAUTHORIZED');
-        if (!auth.can(role, r.opts.perm)) throw new AppError(403, 'FORBIDDEN');
+        if (!identity) throw new AppError(401, 'UNAUTHORIZED');
+        if (!auth.can(identity.role, r.opts.perm)) {
+          audit.record({ actor: identity.role, by: identity.sub, action: 'auth.denied', target: null, details: { route: `${r.method} ${r.path}`, needs: r.opts.perm } });
+          throw new AppError(403, 'FORBIDDEN');
+        }
+        role = identity.role;
       }
+      const ctx = { req, url, role, user: identity?.sub ?? null, identity, deviceId, lang, ip };
       if (r.opts.limiter && !r.opts.limiter.take(ip)) throw new AppError(429, 'RATE_LIMITED');
+      r.opts.preAuth?.(ctx); // route-specific admission control (SOS lanes, login throttling) before the body is read
 
       const body = req.method === 'POST' ? await readBody(req) : {};
       const params = r.re.exec(url.pathname).groups ?? {};
-      const out = await r.handler({ req, url, params, body, role, lang, ip });
-      if (r.opts.audit) audit.record({ actor: role, action: r.opts.audit, target: params.id ?? null, details: r.opts.details?.(out?.body ?? out, body) ?? {} });
+      Object.assign(ctx, { params, body });
+      const out = await r.handler(ctx);
+      if (r.opts.audit) audit.record({ actor: role, by: ctx.user, action: r.opts.audit, target: params.id ?? null, details: r.opts.details?.(out?.body ?? out, body) ?? {} });
       if (out?.raw) { res.writeHead(out.status, { 'Content-Type': out.contentType }); return res.end(out.body); }
       if (out && typeof out === 'object' && 'status' in out && 'body' in out) return send(res, out.status, out.body);
       return send(res, 200, out);
@@ -369,5 +434,5 @@ export function createApp({
   const server = http.createServer(handler);
   server.keepAliveTimeout = 5000;
   const routeTable = () => routes.map((r) => ({ method: r.method, path: r.path, perm: r.opts.perm ?? null }));
-  return { server, store, graph, history, audit, broadcasts, sms, routing, breaker, routeTable, routing, evacuation, crisis, auth, handler };
+  return { server, store, graph, history, audit, broadcasts, sms, routing, breaker, shield, sessions, routeTable, routing, evacuation, crisis, auth, handler };
 }
