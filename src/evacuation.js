@@ -44,16 +44,22 @@ export class EvacuationService {
     const points = ranked.map(({ p, straight }, i) => {
       const r = routes[i];
       const status = r.blocked ? 'unreachable' : pointStatus(p.occupancyPct);
+      // proactive: with the current inflow, how full will it be when the citizen arrives?
+      const rate = this.store.occupancyRate(p.id);
+      const projectedPct = r.blocked || rate == null || rate <= 0 ? p.occupancyPct
+        : Math.min(100, Math.round(((p.occupied + rate * r.etaMin) / p.capacity) * 1000) / 10);
+      const fillingFast = !r.blocked && p.occupancyPct < FULL_PCT && projectedPct >= FULL_PCT;
       return {
         id: p.id, type: p.type, name: p.name, lat: p.lat, lng: p.lng,
-        capacity: p.capacity, occupied: p.occupied, occupancyPct: p.occupancyPct,
+        capacity: p.capacity, occupied: p.occupied, occupancyPct: p.occupancyPct, projectedPct, fillingFast,
         status, straightDistanceM: Math.round(straight),
         route: r.blocked ? null : { geometry: r.geometry, distanceM: r.distanceM, etaMin: r.etaMin, source: r.source },
       };
     });
 
     const usable = points.filter((p) => p.status === 'open' || p.status === 'filling');
-    usable.sort((a, b) => a.route.distanceM - b.route.distanceM);
+    // points that will still have room on arrival come first, then by distance
+    usable.sort((a, b) => Number(a.fillingFast) - Number(b.fillingFast) || a.route.distanceM - b.route.distanceM);
     const recommended = usable[0] ?? null;
 
     // Explain a reroute relative to the nearest-by-air point
@@ -63,6 +69,7 @@ export class EvacuationService {
       const reasons = [];
       if (nearestPoint.status === 'full') reasons.push('POINT_FULL');
       if (nearestPoint.status === 'unreachable') reasons.push('ROAD_BLOCKED');
+      if (nearestPoint.fillingFast) reasons.push('POINT_FILLING_FAST');
       rerouted = {
         fromPointId: nearestPoint.id,
         reasons: reasons.length ? reasons : ['SHORTER_ROUTE'],

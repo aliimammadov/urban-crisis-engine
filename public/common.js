@@ -19,11 +19,15 @@ export function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* storage blocked */ } };
+
 export async function api(method, path, { body, token } = {}) {
   const sep = path.includes('?') ? '&' : '?';
+  const deviceToken = lsGet('deviceToken');
   const res = await fetch(`${path}${sep}lang=${state.lang}`, {
     method,
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(deviceToken ? { 'X-Device-Token': deviceToken } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
   const json = await res.json().catch(() => ({}));
@@ -53,7 +57,15 @@ export function toast(msg, kind = 'ok') {
 }
 
 export function citizenId() {
-  let id = localStorage.getItem('citizenId');
-  if (!id) { id = `c-${crypto.randomUUID()}`; localStorage.setItem('citizenId', id); }
+  let id = lsGet('citizenId');
+  if (!id) { id = `c-${crypto.randomUUID()}`; lsSet('citizenId', id); }
   return id;
+}
+
+/** Gets a server-signed device identity (keeps the same id so the device keeps its reputation). */
+export async function ensureSession(force = false) {
+  if (!force && lsGet('deviceToken')) return;
+  const s = await api('POST', '/api/session', { body: { deviceId: citizenId() } });
+  lsSet('citizenId', s.deviceId);
+  lsSet('deviceToken', s.token);
 }

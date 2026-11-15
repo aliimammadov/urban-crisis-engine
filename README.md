@@ -9,7 +9,8 @@ Zero-dependency prototype (Node ≥ 20, no `npm install`). Two modules in one se
 
 ```bash
 npm start            # http://localhost:3000   (PORT=… to change)
-npm test             # 42 tests, ~0.5s
+npm test             # 90 tests, ~0.5s
+docker compose up --build   # optional (Dockerfile written, image not built on the author's machine)
 npm run demo         # fires a SOS cluster + overcrowding + API outage (server must be running)
 npm run load         # load test (start server with SOS_BURST=100000 API_BURST=100000 to disable limits)
 ```
@@ -54,8 +55,17 @@ Dispatcher: `GET /api/dashboard` (alerts carry `plan`, `typeCounts`, `undoMsLeft
 Admin: `POST /api/sim/{occupancy,chaos,rules,reset}`
 Add `?lang=az|en|ru` for localized error messages.
 
+## What was added after the first prototype
+* **Fake-SOS resistance** (`abuse.js`, `trust.js`, `botdetect.js`, `session.js`): signed device sessions, device reputation, bot/flood detection (IP concentration + burst + rhythm), geo plausibility. Principle: a suspicious SOS is **never dropped**; it is quarantined (not counted for auto-escalation), shown to the dispatcher and can be released in one click. A genuine mass event (many different IPs) is reported as a *surge* and nobody is quarantined. Runtime "security mode" (`requireVerified`).
+* **Proactive forecast**: inflow rate per assembly point -> amber warning before 95 %; citizens are steered away from points that will be full on arrival.
+* **Rule stability**: hysteresis (clear below 90 %), cooldown after approval, no duplicate alert for already-handled SOS.
+* **Demo scenarios panel** (admin): cluster, fake flood, genuine mass event, filling point, overcrowd, API outage, road block, reset. They run the real pipeline.
+* **Time machine**: replay the last 2 hours of the situation on the dispatcher map.
+* **API docs**: `/api/docs` (offline) and `/api/openapi.json`; a test keeps them in sync with the real routes.
+* **Technical write-up**: [docs/TEXNIKI_IZAH.md](docs/TEXNIKI_IZAH.md).
+
 ## Known limitations (honest list)
 * State is in memory (restart = reset). `Store` is the single seam for a DB.
 * The road network is synthetic (MST + nearest neighbours between districts/points), not real streets; routes are straight segments between nodes.
-* Citizen identity is a client-generated id (no phone/OTP). SOS from one device can't be verified.
+* Device identity is server-signed but not tied to a phone number/OTP; a patient attacker with many real IPs could still mint trusted devices.
 * Map tiles / Leaflet load from CDN; without internet lists still work, map doesn't.

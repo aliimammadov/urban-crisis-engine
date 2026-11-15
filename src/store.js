@@ -30,6 +30,10 @@ export class Store extends EventEmitter {
     this.chaos ??= {};
     Object.assign(this.chaos, { externalDown: false, externalLatencyMs: 0 });
     this.seq = 0;
+    this.occSamples = new Map(); // pointId -> [{t, occ}] for inflow-rate forecasts
+    for (const p of this.points.values()) this.recordOccupancy(p.id);
+    this.quarantineVersion = 0; // bumped by AbuseGuard whenever a SOS is (un)quarantined
+    this.guard?.reset?.();
     this.emit('change', 'reset');
   }
 
@@ -57,7 +61,7 @@ export class Store extends EventEmitter {
     return nearest(pos, this.districts)?.item ?? null;
   }
 
-  addSos({ citizenId, type, lat, lng, note }) {
+  addSos({ citizenId, type, lat, lng, note, accuracy }, meta = {}) {
     if (typeof citizenId !== 'string' || !citizenId.trim() || citizenId.length > 64) {
       throw new AppError(400, 'INVALID_CITIZEN_ID');
     }
@@ -73,10 +77,18 @@ export class Store extends EventEmitter {
       districtId: this.nearestDistrict({ lat, lng })?.id ?? null,
       createdAt: this.now(),
       status: 'open',
+      // abuse-guard inputs (never exposed to dashboards: see publicSos)
+      deviceId: meta.deviceId ?? citizenId.trim(),
+      ip: meta.ip ?? 'local',
+      verified: !!meta.verified,
+      accuracy: Number.isFinite(accuracy) && accuracy >= 0 ? Math.min(accuracy, 100_000) : null,
+      quarantined: false,
+      flags: [],
     };
     this.sos.push(sos);
     if (this.sos.length > MAX_SOS) this.sos.splice(0, this.sos.length - MAX_SOS);
     this.safe.delete(sos.citizenId);
+    this.guard?.assess(sos); // may flag/quarantine BEFORE crisis rules run
     this.emit('change', 'sos', sos);
     return sos;
   }
@@ -122,10 +134,45 @@ export class Store extends EventEmitter {
     return { ...rec, resolvedSos: resolved };
   }
 
+  /** Samples feed the inflow-rate forecast. `occ`/`t` can be injected (scenarios backfill history). */
+  recordOccupancy(pointId, occ, t = this.now()) {
+    const p = this.points.get(pointId);
+    if (!p) return;
+    const arr = this.occSamples.get(pointId) ?? [];
+    arr.push({ t, occ: occ ?? p.occupied });
+    arr.sort((a, b) => a.t - b.t);
+    const cutoff = this.now() - 15 * 60_000;
+    while (arr.length > 2 && (arr[0].t < cutoff || arr.length > 300)) arr.shift();
+    this.occSamples.set(pointId, arr);
+  }
+
+  /** People per minute entering the point over the window, or null when there is too little data. */
+  occupancyRate(pointId, windowMs = 5 * 60_000, minSpanMs = 60_000) {
+    const arr = this.occSamples.get(pointId);
+    if (!arr || arr.length < 2) return null;
+    const cutoff = this.now() - windowMs;
+    const w = arr.filter((s) => s.t >= cutoff);
+    if (w.length < 2) return null;
+    const span = w[w.length - 1].t - w[0].t;
+    if (span < minSpanMs) return null;
+    return (w[w.length - 1].occ - w[0].occ) / (span / 60_000);
+  }
+
+  /** Minutes until the point reaches `pct` % at the current inflow rate (0 = already there, null = not filling). */
+  minutesToPct(pointId, pct) {
+    const p = this.points.get(pointId);
+    const rate = this.occupancyRate(pointId);
+    if (!p || rate == null) return null;
+    const remaining = (pct / 100) * p.capacity - p.occupied;
+    if (remaining <= 0) return 0;
+    return rate > 0 ? remaining / rate : null;
+  }
+
   setOccupancy(pointId, occupied) {
     const p = this.getPoint(pointId);
     if (!Number.isFinite(occupied) || occupied < 0) throw new AppError(400, 'INVALID_OCCUPANCY');
     p.occupied = Math.min(Math.round(occupied), p.capacity);
+    this.recordOccupancy(pointId);
     this.emit('change', 'occupancy');
     return this.pointView(p);
   }
@@ -140,6 +187,7 @@ export class Store extends EventEmitter {
     const prev = this.checkins.get(id);
     if (prev) this.points.get(prev).occupied = Math.max(0, this.points.get(prev).occupied - 1);
     p.occupied += 1;
+    this.recordOccupancy(pointId);
     this.checkins.set(id, pointId);
     this.emit('change', 'occupancy');
     return this.pointView(p);
@@ -157,12 +205,14 @@ export class Store extends EventEmitter {
     return { ...b };
   }
 
-  recentOpenSos(windowMs) {
+  /** Open SOS inside the window that may count for escalation (quarantined ones never do). */
+  recentOpenSos(windowMs, { verifiedOnly = false } = {}) {
     const cutoff = this.now() - windowMs;
     const out = [];
     // sos[] is chronological: scan from the newest and stop at the window edge
     for (let i = this.sos.length - 1; i >= 0 && this.sos[i].createdAt >= cutoff; i--) {
-      if (this.sos[i].status === 'open') out.push(this.sos[i]);
+      const s = this.sos[i];
+      if (s.status === 'open' && !s.quarantined && (!verifiedOnly || s.verified)) out.push(s);
     }
     return out.reverse();
   }
@@ -170,19 +220,32 @@ export class Store extends EventEmitter {
   /** Counts per district of currently open SOS (for the zone panel). */
   zoneCounts() {
     const out = Object.fromEntries(this.districts.map((d) => [d.id, 0]));
-    for (const s of this.sos) if (s.status === 'open' && s.districtId) out[s.districtId] += 1;
+    for (const s of this.sos) if (s.status === 'open' && !s.quarantined && s.districtId) out[s.districtId] += 1;
     return out;
   }
 
+  /** Dashboard-safe view of an SOS: no IP, device or citizen identifiers. */
+  publicSos(s) {
+    return {
+      id: s.id, type: s.type, lat: s.lat, lng: s.lng, note: s.note, districtId: s.districtId, createdAt: s.createdAt,
+      status: s.status, verified: s.verified, trust: s.trust ?? null, flags: s.flags, quarantined: s.quarantined,
+    };
+  }
+
   snapshot() {
-    const openSos = this.sos.filter((s) => s.status === 'open');
+    const open = this.sos.filter((s) => s.status === 'open');
+    const openSos = open.filter((s) => !s.quarantined);
+    const quarantined = open.filter((s) => s.quarantined);
     const zones = this.zoneCounts();
     return {
       time: this.now(),
       points: this.listPoints(),
       brigades: [...this.brigades.values()].map((b) => ({ ...b })),
-      sos: openSos.slice(-300),
+      sos: openSos.slice(-300).map((s) => this.publicSos(s)),
       sosTotalOpen: openSos.length,
+      quarantined: quarantined.slice(-50).map((s) => this.publicSos(s)),
+      quarantinedTotal: quarantined.length,
+      abuse: this.guard ? { ...this.guard.verdict } : null,
       zones: this.districts.map((d) => ({ id: d.id, name: d.name, lat: d.lat, lng: d.lng, openSos: zones[d.id] })),
       alerts: this.alerts.filter((a) => a.status === 'open').concat(
         this.alerts.filter((a) => a.status !== 'open').slice(-10),

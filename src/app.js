@@ -11,6 +11,12 @@ import { EvacuationService } from './evacuation.js';
 import { CrisisEngine } from './crisis.js';
 import { Auth } from './auth.js';
 import { RateLimiter } from './ratelimit.js';
+import { Sessions } from './session.js';
+import { clientIp } from './net.js';
+import { SCENARIO_NAMES, runScenario } from './scenarios.js';
+import { History } from './history.js';
+import { buildOpenApi, renderDocs } from './openapi.js';
+import { AbuseGuard } from './abuse.js';
 import { dict, resolveLang, t } from './i18n.js';
 
 const PUBLIC_DIR = resolve(fileURLToPath(new URL('../public', import.meta.url)));
@@ -32,13 +38,30 @@ export function createApp({
   limits = {},
   routingTimeoutMs = 700,
   cancelWindowMs,
+  tokenSecret,
+  tickMs = 5000,
+  historyMs = 5000,
+  trustProxy = process.env.TRUST_PROXY === '1',
 } = {}) {
   const store = new Store(data, { now, cancelWindowMs });
   const graph = new RoadGraph([...data.districts, ...data.points]);
   const routing = new RoutingService(graph, store.chaos, { timeoutMs: routingTimeoutMs });
   const evacuation = new EvacuationService(store, routing);
   const crisis = new CrisisEngine(store, rules);
+  const sessions = new Sessions(tokenSecret);
+  const guard = new AbuseGuard(store, () => crisis.rules);
+  store.guard = guard;
   const snapshot = () => crisis.decorate(store.snapshot());
+
+  const history = new History(store, graph);
+  store.on('change', (kind) => { if (kind === 'reset') history.clear(); history.record(); }); // event-driven (throttled)
+  history.record({ force: true });
+  const histTimer = historyMs > 0 ? setInterval(() => history.record({ force: true }), historyMs) : null;
+  histTimer?.unref();
+
+  // Time-driven pass: forecasts/expiries depend on the clock, not only on incoming events.
+  const ticker = tickMs > 0 ? setInterval(() => crisis.tick(), tickMs) : null;
+  ticker?.unref();
 
   // Re-evaluate crisis rules whenever SOS or occupancy change (cheap: windows are small).
   store.on('change', (kind, payload) => {
@@ -47,6 +70,7 @@ export function createApp({
   });
 
   const sosLimiter = new RateLimiter({ capacity: limits.sosBurst ?? 10, refillPerSec: limits.sosPerSec ?? 0.5, now });
+  const sessionLimiter = new RateLimiter({ capacity: limits.sessionBurst ?? 20, refillPerSec: limits.sessionPerSec ?? 0.5, now });
   const apiLimiter = new RateLimiter({ capacity: limits.apiBurst ?? 200, refillPerSec: limits.apiPerSec ?? 100, now });
 
   // ---- SSE live feed -------------------------------------------------------
@@ -66,9 +90,12 @@ export function createApp({
   const routes = [];
   const route = (method, path, opts, handler) => {
     if (typeof opts === 'function') { handler = opts; opts = {}; }
-    routes.push({ method, re: new RegExp(`^${path.replace(/:(\w+)/g, '(?<$1>[^/]+)')}$`), opts, handler });
+    routes.push({ method, path, re: new RegExp(`^${path.replace(/:(\w+)/g, '(?<$1>[^/]+)')}$`), opts, handler });
   };
 
+  const spec = buildOpenApi();
+  route('GET', '/api/openapi.json', () => spec);
+  route('GET', '/api/docs', () => ({ raw: true, status: 200, contentType: 'text/html; charset=utf-8', body: renderDocs() }));
   route('GET', '/api/health', () => ({ ok: true, time: now() }));
   route('GET', '/api/i18n/:lang', (c) => ({ lang: resolveLang(c.params.lang), messages: dict[resolveLang(c.params.lang)] }));
   route('GET', '/api/config', () => ({ sosTypes: SOS_TYPES, languages: Object.keys(dict), rules: crisis.rules }));
@@ -83,9 +110,15 @@ export function createApp({
     return evacuation.recommend({ lat, lng, district: q.get('district') });
   });
 
+  // Signed device identity. Minting is rate-limited per IP, so spoofing many identities is slow.
+  route('POST', '/api/session', { limiter: sessionLimiter }, (c) => sessions.issue(c.body.deviceId));
+
+  // An SOS is NEVER rejected because of identity problems: a bad/missing token only makes it "unverified".
   route('POST', '/api/sos', { limiter: sosLimiter }, (c) => {
-    const sos = store.addSos(c.body);
-    return { status: 201, body: { id: sos.id, status: sos.status, createdAt: sos.createdAt, districtId: sos.districtId } };
+    const verifiedId = sessions.verify(c.req.headers['x-device-token']);
+    const body = verifiedId ? { ...c.body, citizenId: verifiedId } : c.body;
+    const sos = store.addSos(body, { ip: c.ip, deviceId: verifiedId ?? undefined, verified: !!verifiedId });
+    return { status: 201, body: { id: sos.id, status: sos.status, createdAt: sos.createdAt, districtId: sos.districtId, verified: sos.verified } };
   });
 
   route('GET', '/api/sos/:id', (c) => store.sosStatus(c.params.id));
@@ -100,7 +133,16 @@ export function createApp({
 
   // dispatcher / admin
   route('GET', '/api/dashboard', { perm: 'dashboard' }, () => snapshot());
+  route('GET', '/api/dashboard/history', { perm: 'dashboard' }, (c) => {
+    const frames = history.since(Number(c.url.searchParams.get('minutes')) || 120);
+    return { frames, t0: frames[0]?.t ?? null, t1: frames.at(-1)?.t ?? null, everyMs: 5000 };
+  });
   route('POST', '/api/alerts/:id/approve', { perm: 'alert:approve' }, (c) => crisis.approve(c.params.id, c.role));
+  route('POST', '/api/sos/:id/release', { perm: 'alert:approve' }, (c) => {
+    const s = guard.release(c.params.id);
+    store.emit('change', 'sos', s); // re-run crisis rules: a released SOS may now complete a cluster
+    return store.publicSos(s);
+  });
   route('POST', '/api/alerts/:id/undo', { perm: 'alert:approve' }, (c) => crisis.undo(c.params.id));
   route('POST', '/api/roads/:id/close', { perm: 'road:write' }, (c) => setRoad(c.params.id, true));
   route('POST', '/api/roads/:id/open', { perm: 'road:write' }, (c) => setRoad(c.params.id, false));
@@ -121,11 +163,14 @@ export function createApp({
     return store.chaos;
   });
   route('POST', '/api/sim/rules', { perm: '*' }, (c) => crisis.setRules(c.body));
-  route('POST', '/api/sim/reset', { perm: '*' }, () => {
+  route('GET', '/api/rules', { perm: 'dashboard' }, () => crisis.rules);
+  const resetAll = () => {
     for (const e of graph.edges.values()) { e.closed = false; e.congestion = 1; }
     store.reset();
-    return { ok: true };
-  });
+  };
+  route('POST', '/api/sim/reset', { perm: '*' }, () => { resetAll(); return { ok: true }; });
+  route('GET', '/api/sim/scenarios', { perm: '*' }, () => SCENARIO_NAMES);
+  route('POST', '/api/sim/scenario', { perm: '*' }, (c) => runScenario(String(c.body.name ?? ''), { store, graph, resetAll }));
 
   function setRoad(id, closed) {
     const e = graph.setClosed(id, closed);
@@ -191,7 +236,7 @@ export function createApp({
         return await serveStatic(req, res, url.pathname);
       }
 
-      const ip = req.socket.remoteAddress ?? 'unknown';
+      const ip = clientIp(req, trustProxy);
       if (!apiLimiter.take(ip)) throw new AppError(429, 'RATE_LIMITED');
 
       // SSE stream (dispatcher)
@@ -220,7 +265,8 @@ export function createApp({
 
       const body = req.method === 'POST' ? await readBody(req) : {};
       const params = r.re.exec(url.pathname).groups ?? {};
-      const out = await r.handler({ req, url, params, body, role, lang });
+      const out = await r.handler({ req, url, params, body, role, lang, ip });
+      if (out?.raw) { res.writeHead(out.status, { 'Content-Type': out.contentType }); return res.end(out.body); }
       if (out && typeof out === 'object' && 'status' in out && 'body' in out) return send(res, out.status, out.body);
       return send(res, 200, out);
     } catch (err) {
@@ -230,5 +276,6 @@ export function createApp({
 
   const server = http.createServer(handler);
   server.keepAliveTimeout = 5000;
-  return { server, store, graph, routing, evacuation, crisis, auth, handler };
+  const routeTable = () => routes.map((r) => ({ method: r.method, path: r.path, perm: r.opts.perm ?? null }));
+  return { server, store, graph, history, routeTable, routing, evacuation, crisis, auth, handler };
 }

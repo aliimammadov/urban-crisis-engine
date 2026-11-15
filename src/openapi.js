@@ -1,0 +1,111 @@
+// API description (single source of truth for /api/openapi.json and /api/docs).
+// A test asserts that this list and the real route table never drift apart.
+const T = {
+  citizen: 'Vətəndaş', dispatcher: 'Dispetçer', admin: 'Admin / simulyasiya', system: 'Sistem',
+};
+
+// Documentation routes serve this spec itself, so they are not listed in it.
+export const SELF_ROUTES = ['GET /api/openapi.json', 'GET /api/docs'];
+
+export const ENDPOINTS = [
+  { method: 'GET', path: '/api/health', tag: T.system, auth: 'public', summary: 'Sağlamlıq yoxlaması', response: '{ ok, time }' },
+  { method: 'GET', path: '/api/config', tag: T.system, auth: 'public', summary: 'SOS növləri, dillər, qayda həddləri', response: '{ sosTypes, languages, rules }' },
+  { method: 'GET', path: '/api/i18n/:lang', tag: T.system, auth: 'public', summary: 'Tərcümə lüğəti (az, en, ru)', response: '{ lang, messages }' },
+  { method: 'GET', path: '/api/districts', tag: T.citizen, auth: 'public', summary: 'Rayonlar siyahısı', response: '[ { id, name, lat, lng } ]' },
+  { method: 'GET', path: '/api/points', tag: T.citizen, auth: 'public', summary: 'Aktiv toplanış məntəqələri və doluluq', response: '[ { id, name, type, capacity, occupied, occupancyPct } ]' },
+  { method: 'GET', path: '/api/roads', tag: T.citizen, auth: 'public', summary: 'Yol şəbəkəsi (bağlı yollar daxil)', response: '[ { id, from, to, closed, congestion } ]' },
+  {
+    method: 'GET', path: '/api/evacuation', tag: T.citizen, auth: 'public',
+    summary: 'Ən yaxın təhlükəsiz məntəqələr + tövsiyə olunan təxliyyə marşrutu. Məntəqə ≥90% dolu, yol bağlı və ya dolma sürəti səbəbindən çatanda dolacaqsa alternativ təklif olunur.',
+    query: { lat: 'number', lng: 'number', district: 'string (lat/lng əvəzinə)' },
+    response: '{ origin, recommendedPointId, rerouted:{reasons[]}, noSafePoint, points[ {status, projectedPct, fillingFast, route:{geometry, distanceM, etaMin, source}} ] }',
+  },
+  { method: 'POST', path: '/api/session', tag: T.citizen, auth: 'public', summary: 'İmzalı cihaz kimliyi alır (IP üzrə sürət limiti var)', body: { deviceId: 'string (ixtiyari, əvvəlki kimliyi saxlamaq üçün)' }, response: '{ deviceId, token }' },
+  {
+    method: 'POST', path: '/api/sos', tag: T.citizen, auth: 'device',
+    summary: 'SOS göndərir. X-Device-Token olmadan da qəbul olunur (təsdiqsiz sayılır). SOS heç vaxt kimlik səbəbilə rədd edilmir.',
+    body: { citizenId: 'string (imzalı token varsa nəzərə alınmır)', type: 'FIRE | COLLAPSE | FLOOD | MEDICAL', lat: 'number', lng: 'number', accuracy: 'number (metr, ixtiyari)', note: 'string ≤280' },
+    response: '{ id, status, createdAt, districtId, verified }',
+  },
+  { method: 'GET', path: '/api/sos/:id', tag: T.citizen, auth: 'public', summary: 'SOS-un gedişi: stage 0 ləğv, 2 briqada təyin olunur, 3 yardım yoldadır (+ETA)', response: '{ id, status, stage, etaMin, cancelMsLeft }' },
+  { method: 'POST', path: '/api/sos/:id/cancel', tag: T.citizen, auth: 'public', summary: 'Öz SOS-unu 60 san. ərzində ləğv edir ("səhv göndərdim")', body: { citizenId: 'string (SOS sahibi)' }, response: '{ id, status }' },
+  { method: 'POST', path: '/api/safe', tag: T.citizen, auth: 'public', summary: '"Təhlükəsizəm": açıq SOS-ları bağlayır', body: { citizenId: 'string', lat: 'number?', lng: 'number?' }, response: '{ citizenId, resolvedSos }' },
+  { method: 'POST', path: '/api/points/:id/checkin', tag: T.citizen, auth: 'public', summary: 'Məntəqəyə gəliş qeydi (doluluğu artırır)', body: { citizenId: 'string' }, response: 'məntəqə' },
+
+  { method: 'GET', path: '/api/dashboard', tag: T.dispatcher, auth: 'dashboard', summary: 'Canlı panel snapshot-ı: SOS, məntəqələr, briqadalar, həyəcanlar (plan, typeCounts, undoMsLeft), karantin, hücum nəticəsi', response: 'snapshot' },
+  { method: 'GET', path: '/api/stream', tag: T.dispatcher, auth: 'dashboard', summary: 'Server-Sent Events: hər dəyişiklikdə "snapshot" hadisəsi (?token=)', response: 'text/event-stream', sse: true },
+  { method: 'GET', path: '/api/dashboard/history', tag: T.dispatcher, auth: 'dashboard', summary: 'Zaman maşını: son N dəqiqənin kompakt kadrları', query: { minutes: 'number ≤240 (default 120)' }, response: '{ frames[], t0, t1, everyMs }' },
+  { method: 'GET', path: '/api/rules', tag: T.dispatcher, auth: 'dashboard', summary: 'Cari qayda həddləri', response: 'rules' },
+  { method: 'POST', path: '/api/alerts/:id/approve', tag: T.dispatcher, auth: 'alert:approve', summary: 'Bir kliklə: ən yaxın azad briqadanı göndər + ehtiyat məntəqəni aç (amber xəbərdarlıqda yalnız məntəqə). İdempotentdir.', response: 'alert' },
+  { method: 'POST', path: '/api/alerts/:id/undo', tag: T.dispatcher, auth: 'alert:approve', summary: 'Təsdiqi 10 saniyə ərzində geri qaytarır', response: 'alert' },
+  { method: 'POST', path: '/api/sos/:id/release', tag: T.dispatcher, auth: 'alert:approve', summary: 'Karantindəki SOS-u "doğrudur" kimi buraxır', response: 'sos' },
+  { method: 'POST', path: '/api/roads/:id/close', tag: T.dispatcher, auth: 'road:write', summary: 'Yolu bağlayır', response: '{ id, closed }' },
+  { method: 'POST', path: '/api/roads/:id/open', tag: T.dispatcher, auth: 'road:write', summary: 'Yolu açır', response: '{ id, closed }' },
+  { method: 'POST', path: '/api/roads/:id/congestion', tag: T.dispatcher, auth: 'road:write', summary: 'Yol tıxacı əmsalı', body: { factor: 'number ≥1' }, response: 'yol' },
+  { method: 'POST', path: '/api/brigades/:id/status', tag: T.dispatcher, auth: 'brigade:write', summary: 'Briqada statusu', body: { status: 'available | dispatched | on_scene | offline' }, response: 'briqada' },
+
+  { method: 'POST', path: '/api/sim/occupancy', tag: T.admin, auth: '*', summary: 'Məntəqənin doluluğunu təyin edir', body: { pointId: 'string', occupied: 'number' }, response: 'məntəqə' },
+  { method: 'POST', path: '/api/sim/chaos', tag: T.admin, auth: '*', summary: 'Xarici API kəsintisi / gecikməsi', body: { externalDown: 'boolean', externalLatencyMs: 'number' }, response: 'chaos' },
+  { method: 'POST', path: '/api/sim/rules', tag: T.admin, auth: '*', summary: 'Qayda həddlərini işləyərkən dəyişir (yoxlanılır). "Təhlükəsizlik rejimi": requireVerified', body: { minDistinctReporters: 'number', overcrowdPct: 'number', requireVerified: 'boolean', '…': 'bax /api/config' }, response: 'rules' },
+  { method: 'GET', path: '/api/sim/scenarios', tag: T.admin, auth: '*', summary: 'Demo ssenari adları', response: '[ name ]' },
+  { method: 'POST', path: '/api/sim/scenario', tag: T.admin, auth: '*', summary: 'Ssenarini real boru kəmərində işlədir', body: { name: 'cluster | fake_flood | mass_event | filling | overcrowd | api_outage | road_block | reset' }, response: '{ name, … }' },
+  { method: 'POST', path: '/api/sim/reset', tag: T.admin, auth: '*', summary: 'Bütün vəziyyəti sıfırlayır', response: '{ ok }' },
+];
+
+const AUTH_TEXT = {
+  public: 'açıq', device: 'ixtiyari X-Device-Token', dashboard: 'Bearer (dispetçer/müşahidəçi/admin)', 'alert:approve': 'Bearer (dispetçer/admin)',
+  'road:write': 'Bearer (dispetçer/admin)', 'brigade:write': 'Bearer (dispetçer/admin)', '*': 'Bearer (yalnız admin)',
+};
+
+const toOpenApiPath = (p) => p.replace(/:(\w+)/g, '{$1}');
+const fields = (o) => Object.fromEntries(Object.entries(o ?? {}).map(([k, v]) => [k, { description: String(v) }]));
+
+export function buildOpenApi() {
+  const paths = {};
+  for (const e of ENDPOINTS) {
+    const path = toOpenApiPath(e.path);
+    paths[path] ??= {};
+    const params = [
+      ...[...e.path.matchAll(/:(\w+)/g)].map((m) => ({ name: m[1], in: 'path', required: true, schema: { type: 'string' } })),
+      ...Object.entries(e.query ?? {}).map(([name, d]) => ({ name, in: 'query', schema: { type: 'string' }, description: d })),
+    ];
+    paths[path][e.method.toLowerCase()] = {
+      tags: [e.tag],
+      summary: e.summary,
+      parameters: params,
+      ...(e.body ? { requestBody: { content: { 'application/json': { schema: { type: 'object', properties: fields(e.body) } } } } } : {}),
+      responses: { 200: { description: e.response ?? '' }, 400: { description: 'Yanlış sorğu' }, 401: { description: 'Token yoxdur' }, 403: { description: 'İcazə yoxdur' }, 429: { description: 'Sürət limiti' } },
+      'x-auth': AUTH_TEXT[e.auth] ?? e.auth,
+      ...(e.auth !== 'public' && e.auth !== 'device' ? { security: [{ bearer: [] }], 'x-permission': e.auth } : {}),
+    };
+  }
+  return {
+    openapi: '3.0.3',
+    info: { title: 'Urban Crisis & Crowd Evacuation Engine API', version: '0.2.0', description: 'Vətəndaş təhlükəsizliyi və dispetçer analitikası. Səhv mesajları ?lang=az|en|ru ilə lokallaşır.' },
+    components: { securitySchemes: { bearer: { type: 'http', scheme: 'bearer' }, deviceToken: { type: 'apiKey', in: 'header', name: 'X-Device-Token' } } },
+    paths,
+  };
+}
+
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+/** Self-contained docs page (no CDN, works offline). */
+export function renderDocs() {
+  const tags = [...new Set(ENDPOINTS.map((e) => e.tag))];
+  const color = { GET: '#0a5cc2', POST: '#0b7a42' };
+  const sections = tags.map((tag) => `<h2>${esc(tag)}</h2>` + ENDPOINTS.filter((e) => e.tag === tag).map((e) => `
+    <article>
+      <header><b style="background:${color[e.method]}">${e.method}</b><code>${esc(e.path)}</code><span class="auth">${esc(AUTH_TEXT[e.auth] ?? e.auth)}</span></header>
+      <p>${esc(e.summary)}</p>
+      ${e.query ? `<table><caption>Query</caption>${Object.entries(e.query).map(([k, v]) => `<tr><td><code>${esc(k)}</code></td><td>${esc(v)}</td></tr>`).join('')}</table>` : ''}
+      ${e.body ? `<table><caption>JSON body</caption>${Object.entries(e.body).map(([k, v]) => `<tr><td><code>${esc(k)}</code></td><td>${esc(v)}</td></tr>`).join('')}</table>` : ''}
+      ${e.response ? `<div class="resp">→ <code>${esc(e.response)}</code></div>` : ''}
+    </article>`).join('')).join('');
+  return `<!doctype html><html lang="az"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>API</title>
+<style>body{font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;max-width:900px;margin:0 auto;padding:24px 16px;color:#0b0b0f;background:#f4f5f7}
+h1{margin:0 0 4px}h2{margin:32px 0 10px}article{background:#fff;border:1px solid #e4e5ea;border-radius:12px;padding:12px 14px;margin-bottom:10px}
+header{display:flex;gap:10px;align-items:center;flex-wrap:wrap}header b{color:#fff;border-radius:6px;padding:2px 8px;font-size:12px}code{font:13px ui-monospace,Menlo,monospace}
+.auth{margin-left:auto;font-size:12px;color:#5f6470;background:#f4f5f7;border-radius:999px;padding:2px 10px}p{margin:6px 0}
+table{border-collapse:collapse;font-size:13px;margin:6px 0}caption{text-align:left;font-weight:600;color:#5f6470}td{border-top:1px solid #eef0f3;padding:3px 12px 3px 0;vertical-align:top}.resp{font-size:13px;color:#3d4350}</style></head>
+<body><h1>Urban Crisis Engine API</h1><div style="color:#5f6470">OpenAPI: <a href="/api/openapi.json">/api/openapi.json</a> · Səhv mesajları <code>?lang=az|en|ru</code> · Staff token: <code>Authorization: Bearer …</code></div>${sections}</body></html>`;
+}

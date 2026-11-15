@@ -10,6 +10,11 @@ const { server } = createApp({
   },
 });
 
+const usingDemoTokens = !process.env.ADMIN_TOKEN || !process.env.DISPATCHER_TOKEN;
+if (process.env.NODE_ENV === 'production' && usingDemoTokens) {
+  console.warn('WARNING: demo staff tokens are active. Set ADMIN_TOKEN, DISPATCHER_TOKEN (and TOKEN_SECRET) before exposing this service.');
+}
+
 server.listen(port, () => {
   console.log(`Urban Crisis Engine  → http://localhost:${port}`);
   const lan = Object.values(networkInterfaces()).flat().find((i) => i && i.family === 'IPv4' && !i.internal)?.address;

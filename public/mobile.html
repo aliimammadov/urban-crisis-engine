@@ -185,7 +185,7 @@
 </div>
 
 <script type="module">
-import { api, citizenId, esc, initMap, loadLang, name, pctColor, state, tr } from './common.js';
+import { api, citizenId, ensureSession, esc, initMap, loadLang, name, pctColor, state, tr } from './common.js';
 
 const $ = (id) => document.getElementById(id);
 const app = $('app');
@@ -210,6 +210,8 @@ let map, layers, roadLayer;
 // ------------------------------------------------------------------ i18n
 const LANGS = ['az', 'en', 'ru'];
 await loadLang(localStorage.getItem('lang') || 'az');
+ensureSession().catch(() => {}); // signed device identity; retried below if we start offline
+setInterval(() => ensureSession().catch(() => {}), 60_000);
 const districts = await api('GET', '/api/districts').catch(() => []);
 
 function renderStatic() {
@@ -390,9 +392,10 @@ $('cdCancel').addEventListener('click', () => { clearInterval(cdTimer); $('count
 async function sendSos(type) {
   const payload = { citizenId: citizenId(), type, lat: pos.lat, lng: pos.lng };
   try {
-    const r = await api('POST', '/api/sos', { body: payload });
+    const r = await api('POST', '/api/sos', { body: { ...payload, accuracy: acc ?? undefined } });
     current = { id: r.id, type, createdAt: r.createdAt ?? Date.now() };
     buzz([200, 80, 200]);
+    if (!r.verified) ensureSession(true).catch(() => {}); // token missing/expired (e.g. server restarted): refresh for next time
   } catch (e) {
     if (e.status && e.status < 500 && e.status !== 429) { toast(e.message, true); return; }
     queue(payload); current = { id: null, type, createdAt: Date.now(), queued: true };
