@@ -4,15 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="google" content="notranslate">
-<meta name="theme-color" content="#F7F7FB">
-<title>cellsign.tech</title>
+<meta name="theme-color" content="#f4f5f7">
+<title>cellsign</title>
 <link rel="icon" href="icon.svg">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Plus+Jakarta+Sans:wght@700;800&amp;display=swap">
 <style>
   /* Motion: emil-design-eng (strong ease-out, UI under 300ms, scale(.97) on press, enter from .95 + opacity, one orchestrated entrance).
      Copy: anti-slop rules (headings name the content, claims end on a number or a rule, no em dashes, no repeated section template). */
-  :root { --crimson:#D0103A; --crimson-600:#B50D33; --crimson-50:#FDEBEF; --ink:#161C2D; --ink-2:#313A51; --muted:#626B80; --soft:#F2F3F8; --surface:#F7F7FB; --line:#E3E5EE;
-          --green:#0E9F6E; --green-ink:#006C49; --green-50:#E3F5EC; --amber:#F59E0B; --blue:#1F6FEB; --violet-ink:#43228A; --violet-50:#F3EDFF; --night:#0D1626;
+  /* palette = the citizen app + dispatcher (public/mobile.html, public/dispatcher.html :root) */
+  :root { --crimson:#ff3b30; --crimson-600:#b4231a; --crimson-50:#fdeceb; --ink:#0b0b0f; --ink-2:#3d4350; --muted:#5f6470; --soft:#f4f5f7; --surface:#f4f5f7; --line:#e4e5ea;
+          --green:#1a9e55; --green-ink:#0b7a42; --green-50:#e6f6ec; --amber:#e8a100; --blue:#0071e3; --violet-ink:#43228a; --violet-50:#f3edff; --night:#ffffff;
           --ease-out:cubic-bezier(0.23, 1, 0.32, 1);
           --head:'Plus Jakarta Sans','Inter',system-ui,sans-serif; --body:'Inter',system-ui,sans-serif; }
   * { box-sizing:border-box; }
@@ -26,7 +27,7 @@
   nav.scrolled { border-bottom-color:var(--line); }
   nav .wrap { display:flex; align-items:center; gap:22px; height:68px; }
   .mark { display:flex; align-items:center; gap:10px; font:800 21px var(--head); letter-spacing:-0.04em; white-space:nowrap; }
-  .mark img { width:32px; height:32px; border-radius:9px; box-shadow:0 6px 16px rgba(208,16,58,.3); }
+  .mark img { width:32px; height:32px; border-radius:9px; box-shadow:0 6px 16px rgba(255,59,48,.28); }
   .mark i { font-style:normal; color:var(--crimson); }
   nav .links { display:flex; gap:20px; margin-left:auto; font-size:14.5px; color:var(--muted); font-weight:500; }
   nav .links a { transition:color 160ms var(--ease-out); } nav .links a:hover { color:var(--ink); }
@@ -37,11 +38,11 @@
   .btn { display:inline-flex; align-items:center; justify-content:center; height:48px; padding:0 20px; border-radius:14px; font:700 15.5px var(--head); letter-spacing:-0.01em; border:0; cursor:pointer; white-space:nowrap;
          transition:transform 160ms var(--ease-out), background-color 200ms var(--ease-out), border-color 200ms var(--ease-out); }
   .btn:active { transform:scale(0.97); }
-  .btn.sos { background:var(--crimson); color:#fff; box-shadow:0 10px 24px rgba(208,16,58,.3); } .btn.sos:hover { background:var(--crimson-600); }
-  .btn.dark { background:var(--ink); color:#fff; } .btn.ghost { background:#fff; border:1.5px solid var(--line); } .btn.ghost:hover { border-color:#C9CDD8; }
+  .btn.sos { background:var(--crimson); color:#fff; box-shadow:0 10px 24px rgba(255,59,48,.3); } .btn.sos:hover { background:var(--crimson-600); }
+  .btn.dark { background:var(--blue); color:#fff; } .btn.dark:hover { background:#0062c4; } .btn.ghost { background:#fff; border:1.5px solid var(--line); } .btn.ghost:hover { border-color:#C9CDD8; }
   .btn.sm { height:40px; padding:0 16px; font-size:14px; border-radius:12px; }
 
-  .hero { padding:64px 0 72px; background:radial-gradient(60% 70% at 85% 10%, rgba(208,16,58,.08), transparent 70%); }
+  .hero { padding:64px 0 72px; background:radial-gradient(60% 70% at 85% 10%, rgba(255,59,48,.07), transparent 70%); }
   .hero .wrap { display:grid; grid-template-columns:1.15fr .85fr; gap:56px; align-items:center; }
   .badge { display:inline-flex; align-items:center; gap:8px; padding:6px 12px 6px 9px; border-radius:999px; background:#fff; border:1px solid var(--line); font-size:13px; color:var(--ink-2); font-weight:500; }
   .badge .live { width:8px; height:8px; border-radius:50%; background:var(--green); animation:live 1.8s infinite; }
@@ -70,21 +71,24 @@
   .card .ico { width:46px; height:46px; border-radius:14px; display:flex; align-items:center; justify-content:center; flex:none; }
   .card h3 { margin:0; font:800 18.5px var(--head); letter-spacing:-0.025em; } .card p { margin:6px 0 0; color:var(--muted); font-size:15px; }
 
-  .night { background:var(--night); color:#E7EEF8; border-radius:32px; margin:0 24px; padding:72px 0; position:relative; overflow:hidden; }
-  .night::after { content:''; position:absolute; right:-140px; top:-140px; width:440px; height:440px; border-radius:50%; background:repeating-radial-gradient(circle, rgba(255,255,255,.05) 0 1px, transparent 1px 22px); pointer-events:none; }
+  .night { background:#fff; color:var(--ink); border:1px solid var(--line); border-radius:32px; margin:0 24px; padding:72px 0; position:relative; overflow:hidden; }
+  .night::after { content:''; position:absolute; right:-140px; top:-140px; width:440px; height:440px; border-radius:50%; background:repeating-radial-gradient(circle, rgba(11,11,15,.04) 0 1px, transparent 1px 22px); pointer-events:none; }
   .night .two { display:grid; grid-template-columns:1.05fr .95fr; gap:52px; align-items:center; }
-  .night h2 { color:#fff; } .night .sub { color:#9DAECB; } .night .kicker { color:#FF8FA5; }
+  .night h2 { color:var(--ink); } .night .sub { color:var(--muted); } .night .kicker { color:var(--crimson-600); }
   .checks { list-style:none; padding:0; margin:26px 0 0; display:flex; flex-direction:column; gap:12px; }
-  .checks li { display:flex; gap:12px; font-size:15.5px; color:#C7D2E5; } .checks svg { flex:none; margin-top:4px; }
-  .ticket { border-radius:20px; padding:18px 18px 18px 22px; background:#1A2A44; border:1px solid #253858; position:relative; max-width:440px; justify-self:center; width:100%; }
-  .ticket::before { content:''; position:absolute; left:0; top:16px; bottom:16px; width:4px; border-radius:0 4px 4px 0; background:#F0335A; }
-  .ticket .h { display:flex; gap:8px; font-size:13px; color:#8EA0BD; } .ticket .h b { color:#FF8FA5; } .ticket .h span:last-child { margin-left:auto; }
-  .ticket .t { font:700 17px/1.3 var(--head); margin-top:8px; color:#fff; } .ticket .s { font-size:13.5px; color:#8EA0BD; margin-top:4px; }
-  .ticket .plan { margin-top:12px; background:rgba(5,10,20,.4); border-radius:12px; padding:10px 12px; font-size:13.5px; display:flex; flex-direction:column; gap:6px; }
+  .checks li { display:flex; gap:12px; font-size:15.5px; color:var(--ink-2); } .checks svg { flex:none; margin-top:4px; }
+  .ticket { border-radius:18px; padding:16px; background:#fff; border:2px solid var(--crimson); position:relative; max-width:440px; justify-self:center; width:100%; box-shadow:0 18px 40px rgba(11,11,15,.08); }
+  .ticket::before { content:none; }
+  .ticket .h { display:flex; gap:8px; font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); } .ticket .h b { color:var(--crimson-600); } .ticket .h span:last-child { margin-left:auto; }
+  .ticket .t { font:800 18px/1.25 var(--head); letter-spacing:-0.03em; margin-top:8px; color:var(--ink); } .ticket .s { font-size:13.5px; color:var(--muted); margin-top:4px; }
+  .ticket .plan { margin-top:12px; background:var(--soft); border-radius:14px; padding:10px 12px; font-size:13.5px; display:flex; flex-direction:column; gap:6px; }
   .ticket .plan i { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:8px; }
-  .ticket button { margin-top:12px; height:46px; width:100%; border:0; border-radius:12px; background:#F0335A; color:#fff; font:700 15px var(--head); transition:transform 160ms var(--ease-out); cursor:pointer; }
+  .ticket button { margin-top:12px; height:50px; width:100%; border:0; border-radius:14px; background:var(--crimson); color:#fff; font:700 15px var(--head); transition:transform 160ms var(--ease-out); cursor:pointer; }
   .ticket button:active { transform:scale(0.97); }
 
+  .creds { margin-top:26px; display:inline-flex; flex-direction:column; gap:10px; padding:16px 18px; border-radius:16px; background:var(--soft); border:1px solid var(--line); min-width:300px; }
+  .creds b { font:800 14px var(--head); } .creds div { display:flex; justify-content:space-between; gap:20px; font-size:15px; }
+  .creds code { font:700 15px/1 ui-monospace, SFMono-Regular, Menlo, monospace; background:#fff; border:1px solid var(--line); border-radius:8px; padding:6px 9px; user-select:all; }
   .fails { list-style:none; padding:0; margin:30px 0 0; border-top:1px solid var(--line); }
   .fails li { padding:16px 0; border-bottom:1px solid var(--line); font-size:16px; color:var(--ink-2); }
   .steps { display:grid; grid-template-columns:repeat(3, 1fr); gap:28px; margin-top:48px; counter-reset:s; }
@@ -111,7 +115,7 @@
 <body>
 
 <nav id="nav"><div class="wrap">
-  <a class="mark" href="landing.html"><img src="icon.svg" alt="">cellsign<i>.tech</i></a>
+  <a class="mark" href="./"><img src="icon.svg" alt="">cellsign</a>
   <div class="links"><a href="#citizen" data-i18n="l.nav.how"></a><a href="#dispatch" data-i18n="l.nav.dispatch"></a><a href="#failures" data-i18n="l.nav.res"></a></div>
   <div class="seg" id="langSeg" role="radiogroup" aria-label="Language"><span class="thumb"></span><button role="radio" data-l="az">AZ</button><button role="radio" data-l="en">EN</button><button role="radio" data-l="ru">RU</button></div>
   <a class="btn dark sm" href="mobile" data-i18n="l.nav.open"></a>
@@ -130,7 +134,7 @@
     </div>
   </div>
   <div class="device in">
-    <div class="phone"><div class="screen"><span class="notch"></span><iframe id="app" src="mobile" title="cellsign.tech" allow="geolocation; vibrate" loading="eager"></iframe></div></div>
+    <div class="phone"><div class="screen"><span class="notch"></span><iframe id="app" src="mobile" title="cellsign" allow="geolocation; vibrate" loading="eager"></iframe></div></div>
     <small data-i18n="l.phone.note"></small>
   </div>
 </div></header>
@@ -138,9 +142,9 @@
 <section id="citizen"><div class="wrap">
   <div class="reveal"><div class="kicker" data-i18n="l.nav.how"></div><h2 data-i18n="l.cit.h"></h2><p class="sub" data-i18n="l.cit.sub"></p></div>
   <div class="grid2">
-    <div class="card reveal"><span class="ico" style="background:var(--crimson-50)"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#B50D33" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18v-6a5 5 0 0 1 10 0v6M5 18h14v3H5zM12 2.5v2"/></svg></span><div><h3 data-i18n="l.c1.h"></h3><p data-i18n="l.c1.p"></p></div></div>
-    <div class="card reveal"><span class="ico" style="background:var(--green-50)"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#006C49" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-6 7-11a7 7 0 0 0-14 0c0 5 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg></span><div><h3 data-i18n="l.c2.h"></h3><p data-i18n="l.c2.p"></p></div></div>
-    <div class="card reveal"><span class="ico" style="background:var(--soft)"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#313A51" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16v10H8l-4 4z"/></svg></span><div><h3 data-i18n="l.c3.h"></h3><p data-i18n="l.c3.p"></p></div></div>
+    <div class="card reveal"><span class="ico" style="background:var(--crimson-50)"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#b4231a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18v-6a5 5 0 0 1 10 0v6M5 18h14v3H5zM12 2.5v2"/></svg></span><div><h3 data-i18n="l.c1.h"></h3><p data-i18n="l.c1.p"></p></div></div>
+    <div class="card reveal"><span class="ico" style="background:var(--green-50)"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#0b7a42" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-6 7-11a7 7 0 0 0-14 0c0 5 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg></span><div><h3 data-i18n="l.c2.h"></h3><p data-i18n="l.c2.p"></p></div></div>
+    <div class="card reveal"><span class="ico" style="background:var(--soft)"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#3d4350" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16v10H8l-4 4z"/></svg></span><div><h3 data-i18n="l.c3.h"></h3><p data-i18n="l.c3.p"></p></div></div>
     <div class="card reveal"><span class="ico" style="background:var(--violet-50)"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#43228A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2a1.6 1.6 0 1 0 0 3.2 1.6 1.6 0 0 0 0-3.2zM11 8.5v5h5l2 5M8.6 10.6a5 5 0 1 0 6.6 7.2"/></svg></span><div><h3 data-i18n="l.c4.h"></h3><p data-i18n="l.c4.p"></p></div></div>
   </div>
 </div></section>
@@ -148,16 +152,17 @@
 <div class="night" id="dispatch"><div class="wrap two">
   <div class="reveal"><div class="kicker" data-i18n="l.nav.dispatch"></div><h2 data-i18n="l.disp.h"></h2><p class="sub" data-i18n="l.disp.p"></p>
     <ul class="checks">
-      <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2BC48A" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><span data-i18n="l.disp.li1"></span></li>
-      <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2BC48A" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><span data-i18n="l.disp.li2"></span></li>
-      <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2BC48A" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><span data-i18n="l.disp.li3"></span></li>
+      <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1a9e55" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><span data-i18n="l.disp.li1"></span></li>
+      <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1a9e55" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><span data-i18n="l.disp.li2"></span></li>
+      <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1a9e55" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><span data-i18n="l.disp.li3"></span></li>
     </ul>
+    <div class="creds" role="note"><b data-i18n="l.creds.title"></b><div><span data-i18n="l.creds.user"></span><code>admin</code></div><div><span data-i18n="l.creds.pass"></span><code>admin-demo</code></div></div>
   </div>
   <div class="ticket reveal" aria-hidden="true">
     <div class="h"><b data-i18n="d.redAlerts"></b><span data-i18n="l.t.zone"></span><span data-i18n="l.t.now"></span></div>
     <div class="t" data-i18n="alert.RED_DISPATCH_AND_OPEN_POINT"></div>
     <div class="s" data-i18n="l.t.sub"></div>
-    <div class="plan"><div><i style="background:#5B9DFF"></i><span data-i18n="l.t.p1"></span></div><div><i style="background:#2BC48A"></i><span data-i18n="l.t.p2"></span></div></div>
+    <div class="plan"><div><i style="background:#0071e3"></i><span data-i18n="l.t.p1"></span></div><div><i style="background:#1a9e55"></i><span data-i18n="l.t.p2"></span></div></div>
     <button type="button" tabindex="-1" data-i18n="d.approve"></button>
   </div>
 </div></div>
@@ -176,10 +181,11 @@
 
 <section class="final"><div class="wrap reveal">
   <h2 data-i18n="l.f.h"></h2><p class="sub" data-i18n="l.f.p"></p>
+  <div class="creds" role="note" style="margin-top:22px;text-align:left"><b data-i18n="l.creds.title"></b><div><span data-i18n="l.creds.user"></span><code>admin</code></div><div><span data-i18n="l.creds.pass"></span><code>admin-demo</code></div></div>
   <div class="ctas"><a class="btn sos" href="mobile" data-i18n="l.cta.sos"></a><a class="btn ghost" href="dispatcher" data-i18n="l.cta.disp"></a></div>
 </div></section>
 
-<footer><div class="wrap"><span>cellsign.tech &copy; 2026, <span data-i18n="l.foot"></span></span><span><a href="brand.html" data-i18n="l.brand"></a><a href="api/docs" data-i18n="l.api"></a></span></div></footer>
+<footer><div class="wrap"><span>cellsign &copy; 2026, <span data-i18n="l.foot"></span></span><span><a href="brand.html" data-i18n="l.brand"></a><a href="api/docs" data-i18n="l.api"></a></span></div></footer>
 
 <script type="module">
 import { loadLang, state, tr } from './common.js';

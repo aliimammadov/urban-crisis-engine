@@ -216,7 +216,7 @@
   </section>
 </main>
 
-<div id="login"><form id="loginForm"><h2 id="loginTitle"></h2><input id="user" autocomplete="username"><input id="token" type="password" autocomplete="current-password"><button type="submit" id="loginSubmit"></button><div class="small" id="loginErr"></div></form></div>
+<div id="login"><form id="loginForm"><h2 id="loginTitle"></h2><input id="user" autocomplete="username"><input id="token" type="password" autocomplete="current-password"><button type="submit" id="loginSubmit"></button><div class="small" id="loginDemo" style="background:#f4f5f7;border-radius:10px;padding:8px 10px;color:#3d4350"></div><div class="small" id="loginErr"></div></form></div>
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script type="module">
@@ -279,7 +279,7 @@ function statics() {
   $('tPend').textContent = tr('d.pending.title'); $('pendHint').textContent = tr('d.pending.hint');
   $('tSusp').textContent = tr('d.suspicious'); $('suspNote').textContent = tr('d.suspiciousNote');
   $('scSummary').textContent = tr('d.scenarios'); $('tManual').textContent = tr('d.manual');
-  $('loginTitle').textContent = tr('d.login.title'); $('loginSubmit').textContent = tr('d.login.submit'); $('token').placeholder = tr('d.login.pass'); $('user').placeholder = tr('d.login.user'); $('logout').textContent = tr('d.logout');
+  $('loginTitle').textContent = tr('d.login.title'); $('loginDemo').textContent = tr('d.login.demo'); $('loginSubmit').textContent = tr('d.login.submit'); $('token').placeholder = tr('d.login.pass'); $('user').placeholder = tr('d.login.user'); $('logout').textContent = tr('d.logout');
   $('simSet').textContent = tr('d.sim.set'); $('simApiL').textContent = tr('d.sim.api'); $('tRouting').textContent = tr('d.sim.api');
   { const cur = $('simApi').value || snap?.chaos?.mode || 'ok'; $('simApi').innerHTML = ['ok', 'http503', 'slow', 'error'].map((m) => `<option value="${m}">${esc(tr('d.sim.api.' + m))}</option>`).join(''); $('simApi').value = cur; }
   $('roadRandom').textContent = tr('d.sim.closeRoad'); $('reset').textContent = tr('d.sim.reset');
@@ -323,7 +323,7 @@ initTabs('tabsR', 'dtab', 'brig');
 initTabs('tabsL', 'dtabL', 'alerts');
 
 // ---------------------------------------------------------------- login + stream
-function showLogin(msg = '') { $('login').classList.add('on'); $('loginErr').textContent = msg; $('user').value ||= 'dispatcher'; $('token').value = ''; ($('user').value ? $('token') : $('user')).focus(); }
+function showLogin(msg = '') { $('login').classList.add('on'); $('loginErr').textContent = msg; $('user').value ||= 'admin'; $('loginDemo').textContent = tr('d.login.demo'); $('token').value = ''; ($('user').value ? $('token') : $('user')).focus(); }
 function signOut(msg = '') { es?.close(); es = null; clearTimeout(refreshTimer); token = ''; me = null; store.del('jwt'); $('who').style.display = $('logout').style.display = 'none'; showLogin(msg); }
 function startSession(sess) {
   token = sess.token; me = sess; store.set('jwt', token);
